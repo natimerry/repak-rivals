@@ -25,7 +25,7 @@ oodle = ["repak/oodle"]
 repak = { path = "../repak" }
 aes = { workspace = true }
 base64 = { workspace = true }
-clap = { version = "4.5.29", features = ["derive"] }
+clap = { version = "4.5.31", features = ["derive"] }
 hex = { workspace = true }
 indicatif = { version = "0.17.11", features = ["rayon"] }
 path-clean = "1.0.1"
