@@ -16,7 +16,7 @@ encryption = ["dep:aes"]
 [dependencies]
 byteorder = "1.5"
 aes = { workspace = true, optional = true }
-flate2 = { version = "1.0", optional = true }
+flate2 = { version = "1.1", optional = true }
 zstd = { version = "0.13", optional = true }
 lz4_flex = { version = "0.11.3", optional = true }
 oodle_loader = { path = "../oodle_loader", optional = true}
