@@ -66,7 +66,7 @@ pub fn get_current_pak_characteristics(mod_contents: Vec<String>) -> String {
 
     for file in &mod_contents {
         if let Some(stripped) = file.strip_prefix("Marvel/Content/Marvel/") {
-            let category = stripped.split('/').into_iter().next().unwrap_or_default();
+            let category = stripped.split('/').next().unwrap_or_default();
 
             if category == "Characters" {
                 // Extract the ID from the file path

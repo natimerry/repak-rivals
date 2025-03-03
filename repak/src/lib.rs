@@ -112,18 +112,14 @@ impl Version {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, strum::Display, strum::EnumString, strum::VariantNames)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, strum::Display, strum::EnumString, strum::VariantNames,Default)]
 pub enum Compression {
     Zlib,
     Gzip,
+    #[default]
     Oodle,
     Zstd,
     LZ4,
-}
-impl Default for Compression {
-    fn default() -> Self {
-        Compression::Oodle
-    }
 }
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Default, Clone)]

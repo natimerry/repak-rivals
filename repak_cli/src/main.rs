@@ -471,14 +471,15 @@ fn pack(aes_key: Option<aes::Aes256>, args: ActionPack) -> Result<(), repak::Err
             p.extension().and_then(|ext| ext.to_str()) == Some("uasset")
                 && (p.to_str().unwrap().to_lowercase().contains("meshes"))
         })
-        .map(|p| p.clone())
+        .cloned()
         .collect::<Vec<PathBuf>>();
 
     let patched_cache_file = input_path.join("patched_files");
     let file = OpenOptions::new()
         .read(true) // Allow reading
         .write(true) // Allow writing
-        .create(true) // Create the file if it doesn’t exist
+        .create(true)
+        .truncate(false) // Create the file if it doesn’t exist
         .open(&patched_cache_file)?;
 
     let patched_files = BufReader::new(&file)
@@ -517,7 +518,7 @@ fn pack(aes_key: Option<aes::Aes256>, args: ActionPack) -> Result<(), repak::Err
                     "{}.bak",
                     uassetfile.file_name().unwrap().to_str().unwrap()
                 )),
-                &uassetfile,
+                uassetfile,
             )
             .expect("Couldnt backup from .bak file, has this been repacked through repak?");
             File::create(input_path.join("patched_files"))?; // truncates the file
@@ -569,7 +570,7 @@ fn pack(aes_key: Option<aes::Aes256>, args: ActionPack) -> Result<(), repak::Err
                 .expect("failed to convert to slash path");
 
             for i in &patched_files {
-                if i.as_str() == rel_uexp.to_string() || i.as_str() == rel_uasset.to_string() {
+                if i.as_str() == *rel_uexp|| i.as_str() == *rel_uasset {
                     println!("Skipping {} (File has already been patched before)", i.yellow());
                     continue 'outer;
                 }
@@ -583,7 +584,7 @@ fn pack(aes_key: Option<aes::Aes256>, args: ActionPack) -> Result<(), repak::Err
                 )),
             )?;
             fs::copy(
-                &uassetfile,
+                uassetfile,
                 dir_path.join(format!(
                     "{}.bak",
                     uassetfile.file_name().unwrap().to_str().unwrap()
@@ -596,7 +597,7 @@ fn pack(aes_key: Option<aes::Aes256>, args: ActionPack) -> Result<(), repak::Err
             fixer.read_exports(&mut rdr, &mut sizes, &mut offsets, exp_offset, exp_cnt)?;
 
             let backup_file = format!("{}.bak", uexp_file.to_str().unwrap());
-            let backup_file_size = fs::metadata(&uassetfile)?.len();
+            let backup_file_size = fs::metadata(uassetfile)?.len();
             let tmpfile = format!("{}.temp", uexp_file.to_str().unwrap());
 
             drop(rdr);
@@ -605,7 +606,7 @@ fn pack(aes_key: Option<aes::Aes256>, args: ActionPack) -> Result<(), repak::Err
             let mut r = BufReader::new(File::open(&backup_file)?);
             let mut o = BufWriter::new(File::create(&tmpfile)?);
 
-            let exp_rd = fixer.read_uexp(&mut r,  backup_file_size,&*backup_file, &mut o, &offsets);
+            let exp_rd = fixer.read_uexp(&mut r,  backup_file_size,&backup_file, &mut o, &offsets);
             match exp_rd {
                 Ok(_) => {}
                 Err(e) => match e.kind() {

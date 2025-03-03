@@ -7,8 +7,7 @@ use repak::PakReader;
 use sha2::Digest;
 use std::fs::File;
 use std::io::{BufReader, Write};
-use std::path::PathBuf;
-use std::usize::MAX;
+use std::path::{Path, PathBuf};
 use rfd::FileDialog;
 
 pub struct FileTable {
@@ -35,24 +34,21 @@ impl Default for FileTable {
             resizable: true,
             clickable: true,
             file_contents: vec![],
-            selection: MAX,
+            selection: usize::MAX,
         }
     }
 }
 
 impl FileTable {
-    pub fn new(pak_reader: &PakReader, pak_path: &PathBuf) -> Self {
+    pub fn new(pak_reader: &PakReader, pak_path: &Path) -> Self {
         let entries = pak_reader
-            .files()
-            .iter()
-            .map(|s| s.clone())
-            .collect::<Vec<_>>();
+            .files().to_vec();
 
         let file_entries = entries
             .iter()
             .map(|entry| FileEntry {
                 file_path: entry.clone(),
-                pak_path: pak_path.clone(),
+                pak_path: pak_path.to_path_buf(),
                 pak_reader: pak_reader.clone(),
                 entry: pak_reader.get_file_entry(entry).unwrap(),
             })
@@ -102,11 +98,11 @@ impl FileTable {
             .button("View Hash (Click to copy)")
             .on_hover_text(RichText::new(format!(
                 "SHA256 hash: {}",
-                hex::encode(hasher.clone().finalize().to_vec())
+                hex::encode(hasher.clone().finalize())
             )))
             .clicked()
         {
-            ui.output_mut(|o| o.commands = vec![CopyText(hex::encode(hasher.finalize().to_vec()))]);
+            ui.output_mut(|o| o.commands = vec![CopyText(hex::encode(hasher.finalize()))]);
         }
     }
     pub fn table_ui(&mut self, ui: &mut egui::Ui) {
