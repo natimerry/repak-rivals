@@ -26,14 +26,12 @@ use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode, W
 use std::cell::LazyCell;
 use std::fs::File;
 use std::io::BufReader;
+use std::panic::PanicHookInfo;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, thread};
-use std::panic::PanicHookInfo;
-
-
 
 // use eframe::egui::WidgetText::RichText;
 #[derive(Deserialize, Serialize, Default)]
@@ -59,6 +57,7 @@ struct PakEntry {
     reader: PakReader,
     path: PathBuf,
     enabled: bool,
+    mod_type: String,
 }
 fn use_dark_red_accent(style: &mut Style) {
     style.visuals.hyperlink_color = Color32::from_hex("#f71034").expect("Invalid color");
@@ -130,7 +129,6 @@ impl RepakModManager {
             return;
         } else {
             let mut vecs = vec![];
-
             for entry in std::fs::read_dir(self.game_path.clone()).unwrap() {
                 let entry = entry.unwrap();
                 let path = entry.path();
@@ -160,9 +158,10 @@ impl RepakModManager {
                 }
                 let pak = pak.unwrap();
                 let entry = PakEntry {
-                    reader: pak,
+                    reader: pak.clone(),
                     path,
                     enabled: !disabled,
+                    mod_type: get_current_pak_characteristics(pak.files()),
                 };
                 vecs.push(entry);
             }
@@ -241,15 +240,13 @@ impl RepakModManager {
             });
         });
         ui.horizontal(|ui| {
+            let name = &self.pak_files[self.current_pak_file_idx.unwrap()].mod_type;
             ui.add(Label::new(
                 RichText::new("Mod type: ")
                     .strong()
                     .size(self.default_font_size + 1.),
             ));
-            ui.add(Label::new(format!(
-                "{}",
-                get_current_pak_characteristics(full_paths.clone())
-            )));
+            ui.add(Label::new(format!("{}",name)));
         });
         if let None = self.table {
             self.table = Some(FileTable::new(pak, &pak_path));
@@ -586,7 +583,6 @@ impl RepakModManager {
                                 info!("Opened mod folder: {}", self.game_path.to_string_lossy());
                             }
                             process.unwrap().wait().unwrap();
-
                         }
 
                         #[cfg(target_os = "linux")]
@@ -685,12 +681,10 @@ const ICON: LazyCell<Arc<IconData>> = LazyCell::new(|| {
     let d = eframe::icon_data::from_png_bytes(include_bytes!(
         "../../repak-gui/icons/RepakLogoNonCurveFadedRed-modified.png"
     ))
-        .expect("The icon data must be valid");
+    .expect("The icon data must be valid");
 
     Arc::new(d)
 });
-
-
 
 #[cfg(target_os = "windows")]
 #[link(name = "Kernel32")]

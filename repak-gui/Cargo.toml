@@ -36,6 +36,7 @@ colored = "3.0.0"
 notify = "8.0.0"
 simplelog = "0.12.2"
 simd_str_cmp = {path = "../simd_str_cmp"}
+regex-lite = "0.1.6"
 
 
 [build-dependencies]

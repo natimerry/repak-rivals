@@ -1,12 +1,12 @@
 #![feature(portable_simd)]
-#![feature(test)] // Enable Rust's built-in benchmarking (nightly required)
+#![feature(test)]
+#![feature(stdarch_x86_avx512)]
+// Enable Rust's built-in benchmarking (nightly required)
 extern crate test; // Import Rust's benchmarking module
 
 use rayon::prelude::*;
-use std::arch::x86_64::{
-    __m128i, __m256i, _mm256_cmpeq_epi8, _mm256_loadu_si256, _mm256_movemask_epi8, _mm_cmpeq_epi8,
-    _mm_loadu_si128, _mm_movemask_epi8,
-};
+use std::arch::x86_64::{__m128i, __m256i, _mm256_cmpeq_epi8, _mm256_load_si256, _mm256_loadu_si256, _mm256_movemask_epi8, _mm_cmpeq_epi8, _mm_load_si128, _mm_loadu_si128, _mm_movemask_epi8};
+use std::ops::Add;
 use std::simd::cmp::SimdPartialEq;
 use std::simd::Simd;
 
@@ -121,6 +121,8 @@ fn compare_bytes_simd_64(a: &[u8], b: &[u8]) -> bool {
 
 /// # Safety
 /// Idk what to tell u man this shit is safe trust
+use std::arch::x86_64::*;
+
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 pub unsafe fn compare_bytes_simd_avx2_256(a: &[u8], b: &[u8]) -> bool {
@@ -151,36 +153,24 @@ pub unsafe fn compare_bytes_simd_avx2_256(a: &[u8], b: &[u8]) -> bool {
     true
 }
 
-/// # Safety
-/// Idk what to tell u man this shit is safe trust
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2")]
-pub unsafe fn compare_bytes_simd_avx2_128(a: &[u8], b: &[u8]) -> bool {
-    debug_assert_eq!(a.len(), b.len());
-
+unsafe fn compare_bytes_simd_avx512f(a: &[u8], b: &[u8]) -> bool {
+    #[target_feature(enable = "avx512f")]
     let len = a.len();
     let mut i = 0;
 
-    while i + 16 <= len {
-        let a_chunk = _mm_loadu_si128(a.as_ptr().add(i) as *const __m128i);
-        let b_chunk = _mm_loadu_si128(b.as_ptr().add(i) as *const __m128i);
+    while i + 64 <= len {
+        let a_chunk = _mm512_loadu_si512(a.as_ptr().add(i) as *const i32);
+        let b_chunk = _mm512_loadu_si512(b.as_ptr().add(i) as *const i32);
 
-        let cmp = _mm_cmpeq_epi8(a_chunk, b_chunk);
-        let mask = _mm_movemask_epi8(cmp);
+        let mask = _mm512_cmpeq_epi8_mask(a_chunk, b_chunk);
 
-        if mask != 0xFFFFi32 {
-            return false; // Some bytes do not match
+        if mask != u64::MAX {
+            return false;
         }
 
-        i += 16;
+        i += 64;
     }
-    //
-    // Fallback for remaining bytes
-    if a[i..] != b[i..] {
-        return false;
-    }
-
-    true
+    a[i..] == b[i..]
 }
 
 
@@ -207,17 +197,44 @@ unsafe fn compare_bytes_intrinsics_dynamic(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }
-    let len = a.len();
-    if len < 16 {
-        a == b
-    } else if len < 32 {
-        // Use SIMD in 16-byte chunks.
-        compare_bytes_simd_avx2_128(a, b)
-    } else {
-        // Use SIMD in 32-byte chunks.
+    if is_x86_feature_detected!("avx2") {
         compare_bytes_simd_avx2_256(a, b)
     }
+    else if is_x86_feature_detected!("avx512f") {
+        compare_bytes_simd_avx512f(a, b)
+    }
+    else {
+        unimplemented!()
+    }
 }
+
+pub fn compare_string_vectors_simd_non_par(
+    haystack1: &[String],
+    haystack2: &[String],
+) -> Vec<(usize, usize)> {
+    haystack1
+        .iter()
+        .enumerate()
+        .flat_map(|(i, s1)| {
+            let bytearray1 = s1.as_bytes();
+            haystack2
+                .iter()
+                .enumerate()
+                .filter_map(move |(j, s2)| unsafe {
+                    let bytearray2 = s2.as_bytes();
+                    if bytearray1.len() != bytearray2.len() {
+                        return None;
+                    }
+                    if compare_bytes_intrinsics_dynamic(bytearray1, bytearray2) {
+                        Some((i, j))
+                    } else {
+                        None
+                    }
+                })
+        })
+        .collect()
+}
+
 
 pub fn compare_string_vectors_simd(
     haystack1: &[String],
@@ -382,8 +399,8 @@ mod tests {
         // Create two strings of length 1024.
         // They share the same prefix ("a" repeated 512 times),
         // but then they differ by one character before sharing the remainder.
-        let s1 = "a".repeat(1024);
-        let s2 = format!("{}{}{}", "a".repeat(512), "b", "a".repeat(511));
+        let s1 = "a".repeat(1000);
+        let s2 = format!("{}{}{}", "a".repeat(499), "b", "a".repeat(500));
         // Ensure both strings have the same length.
         assert_eq!(s1.len(), s2.len());
 
@@ -396,6 +413,25 @@ mod tests {
             conflicts.is_empty(),
             "Expected no conflict because the strings differ after the common prefix"
         );
+
+
+        assert_eq!(compare_string_vectors(&haystack1, &haystack2),
+                   compare_string_vectors_simd(&haystack1,&haystack2));
+    }
+
+    #[test]
+    fn test_really_long_strings() {
+        // Create two strings of length 1024.
+        // They share the same prefix ("a" repeated 512 times),
+        // but then they differ by one character before sharing the remainder.
+        let s1 = "a".repeat(1000);
+
+        let haystack1 = vec![s1.clone()];
+        let haystack2 = vec![s1.clone()];
+
+        // Since the strings differ by one character, no conflict should be detected.
+        let conflicts = compare_string_vectors(&haystack1, &haystack2);
+        assert_eq!(conflicts.len(), 1);
 
 
         assert_eq!(compare_string_vectors(&haystack1, &haystack2),

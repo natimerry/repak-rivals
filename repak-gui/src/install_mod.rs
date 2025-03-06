@@ -1,24 +1,30 @@
+use crate::install_mod::ModConflicts::{Hard, Soft};
 use crate::pak_logic::install_mods_in_viewport;
+use crate::utils::{collect_files, get_character_mod_skin, get_current_pak_characteristics};
 use crate::{setup_custom_style, ICON};
-use crate::utils::{collect_files, get_current_pak_characteristics};
 use eframe::egui;
 use eframe::egui::{Align, Checkbox, ComboBox, Context, Label, TextEdit};
 use egui_extras::{Column, TableBuilder};
 use egui_flex::{item, Flex, FlexAlign};
 use log::{debug, error, info, warn};
+use rayon::iter::IntoParallelRefIterator;
+use regex_lite::Regex;
 use repak::utils::AesKey;
 use repak::{Compression, PakReader};
+use sha2::digest::block_buffer::Lazy;
+use simd_str_cmp::{
+    compare_string_vectors, compare_string_vectors_simd, compare_string_vectors_simd_non_par,
+};
 use std::fs::File;
 use std::io::BufReader;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, AtomicI32};
 use std::sync::atomic::Ordering::SeqCst;
+use std::sync::atomic::{AtomicBool, AtomicI32};
 use std::sync::{Arc, LazyLock};
 use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
-use simd_str_cmp::compare_string_vectors;
 
 #[derive(Debug, Default, Clone)]
 pub struct InstallableMod {
@@ -49,7 +55,6 @@ impl ModInstallRequest {
     pub fn new(mods: Vec<InstallableMod>, mod_directory: PathBuf) -> Self {
         let len = mods.len();
         check_mod_file_collisions(&mods);
-
         Self {
             animate: false,
             mods,
@@ -60,6 +65,11 @@ impl ModInstallRequest {
             stop_thread: Arc::new(AtomicBool::new(false)),
         }
     }
+}
+
+enum ModConflicts {
+    Hard(String),
+    Soft(String),
 }
 impl ModInstallRequest {
     pub fn new_mod_dialog(&mut self, ctx: &egui::Context, show_callback: &mut bool) {
@@ -118,13 +128,38 @@ impl ModInstallRequest {
                                     let mut mods =
                                         self.mods.iter().map(|x| x.clone()).collect::<Vec<_>>(); // clone
 
-                                    let dir = self.mod_directory.clone();
-                                    let new_atomic = self.installed_mods_cbk.clone();
-                                    let new_stop_thread = self.stop_thread.clone();
-                                    self.joined_thread = Some(std::thread::spawn(move || {
-                                        install_mods_in_viewport(&mut mods, &dir, &new_atomic,&new_stop_thread);
-                                    }));
-                                    self.animate = true;
+                                    let collisions = check_mod_file_collisions(&mods);
+                                    if collisions.is_empty() {
+                                        let dir = self.mod_directory.clone();
+                                        let new_atomic = self.installed_mods_cbk.clone();
+                                        let new_stop_thread = self.stop_thread.clone();
+                                        self.joined_thread = Some(std::thread::spawn(move || {
+                                            install_mods_in_viewport(
+                                                &mut mods,
+                                                &dir,
+                                                &new_atomic,
+                                                &new_stop_thread,
+                                            );
+                                        }));
+                                        self.animate = true;
+                                    }
+                                    let hard_conflicts = collisions
+                                        .iter()
+                                        .filter(|x| match x {
+                                            Soft(_) => false,
+                                            Hard(_) => true,
+                                        })
+                                        .collect::<Vec<_>>();
+
+                                    if !hard_conflicts.is_empty() {
+                                        rfd::MessageDialog::new()
+                                            .set_title("Hard conflicts detected!")
+                                            .set_description(format!(
+                                                "{} conflicts detected",
+                                                hard_conflicts.len()
+                                            )).show();
+                                        return;
+                                    }
                                 }
                             });
 
@@ -299,41 +334,58 @@ pub const AES_KEY: LazyLock<AesKey> = LazyLock::new(|| {
         .expect("Unable to initialise AES_KEY")
 });
 
-fn build_conflict_path_list(installable_mod: &InstallableMod) -> Vec<String>{
+fn build_conflict_path_list(installable_mod: &InstallableMod) -> Vec<String> {
+    use regex_lite::Regex;
     let mut files = vec![];
-    if installable_mod.is_dir{
+    if installable_mod.is_dir {
         let mut paths = Vec::new();
         collect_files(&mut paths, &installable_mod.mod_path).expect("Failed to collect files");
-        files = paths.iter().map(|x|x.to_str().unwrap().to_string()).collect::<Vec<String>>();
-    }
-    else {
+        files = paths
+            .iter()
+            .map(|x| x.to_str().unwrap().to_string())
+            .collect::<Vec<String>>();
+    } else {
         files = installable_mod.reader.clone().unwrap().files();
     }
+
     files
 }
-fn check_mod_file_collisions(mod_list: &[InstallableMod]) -> Vec<(String,String)>{
-    let mut conflicts: Vec<(String,String)> = Vec::new();
-    for (i,mod1) in mod_list.iter().enumerate() {
+
+fn check_mod_file_collisions(mod_list: &[InstallableMod]) -> Vec<ModConflicts> {
+    let mut conflicts: Vec<ModConflicts> = Vec::new();
+    for (i, mod1) in mod_list.iter().enumerate() {
         let mut files1: Vec<String> = build_conflict_path_list(mod1);
+        let mod1_type = mod1.mod_type.clone();
         debug!("Len of files21 {}", files1.len());
-        
-        for mod2 in mod_list.iter().skip(i+1) {
+        for mod2 in mod_list.iter().skip(i + 1) {
+            let mod2_type = mod2.mod_type.clone();
+
+            if mod1_type == mod2_type {
+                conflicts.push(Soft(mod1_type.clone()))
+            }
             let mut files2: Vec<String> = build_conflict_path_list(mod2);
             debug!("Len of files2: {}", files2.len());
-            let conflict_idx = compare_string_vectors(&files1, &files2);
-            if conflict_idx.is_empty(){
-                debug!("Mod1 and Mod2 have no conflicts");
+            let conflict_idx;
+            if files1.len() * files2.len() < 2500 {
+                conflict_idx = compare_string_vectors_simd(&files1, &files2)
+            } else {
+                conflict_idx = compare_string_vectors_simd_non_par(&files2, &files1)
             }
-            else{
+
+            if conflict_idx.is_empty() {
+                debug!("Mod1 and Mod2 have no hard conflicts");
+            } else {
                 println!("Mod1 and Mod2 have {} conflicts", conflict_idx.len());
-                for (i,j) in conflict_idx{
-                    conflicts.push((files1[i].clone(),files2[j].clone()));
-                    warn!("Conflicting {} in {} and {}",files1[i],&mod1.mod_name,&mod2.mod_name);
+                for (i, j) in conflict_idx {
+                    conflicts.push(Hard(files1[i].clone()));
+                    warn!(
+                        "Conflicting {} in {} and {}",
+                        files1[i], &mod1.mod_name, &mod2.mod_name
+                    );
                 }
             }
         }
     }
-
     conflicts
 }
 
@@ -381,8 +433,6 @@ pub fn map_paths_to_mods(paths: &Vec<PathBuf>) -> Vec<InstallableMod> {
         })
         .filter_map(|x: Result<InstallableMod, repak::Error>| x.ok())
         .collect::<Vec<_>>();
-
-
     installable_mods
 }
 
