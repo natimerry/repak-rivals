@@ -767,9 +767,6 @@ extern "system" {
     fn GetConsoleProcessList(processList: *mut u32, count: u32) -> u32;
     fn FreeConsole() -> i32;
 }
-use egui_colors::tokens::ThemeColor;
-use egui_colors::utils::EGUI_THEME;
-use egui_colors::Colorix;
 #[allow(unused_imports)]
 #[cfg(target_os = "windows")]
 use std::panic::PanicHookInfo;

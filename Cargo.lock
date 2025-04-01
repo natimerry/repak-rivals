@@ -1282,15 +1282,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "egui_colors"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ba65dff4832a7b1f09e37ab6ac140e10129b0562ff6e9d577fd1946a26a8cd7"
-dependencies = [
- "egui",
-]
-
-[[package]]
 name = "egui_extras"
 version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3287,7 +3278,6 @@ dependencies = [
  "colored",
  "dirs",
  "eframe",
- "egui_colors",
  "egui_extras",
  "egui_flex",
  "hex",

@@ -35,6 +35,5 @@ colored = "3.0.0"
 notify = "8.0.0"
 simplelog = "0.12.2"
 regex-lite = "0.1.5"
-egui_colors = "0.8.0"
 [build-dependencies]
 winres = "0.1.12"

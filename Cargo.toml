@@ -11,8 +11,7 @@ edition = "2021"
 keywords = ["marvel-rivals","unreal-engine", "pak", "unrealpak"]
 
 
-[workspace.metadata.dist]
-release-notes = "CHANGELOG.md"
+
 
 [profile.release]
 lto = "thin"
