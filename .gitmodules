@@ -2,3 +2,7 @@
 	path = uasset-mesh-patch-rivals
 	url = https://github.com/natimerry/uasset-mesh-patch-rivals
 
+[submodule "winit-dnd"]
+	path = winit-dnd
+	url = https://github.com/natimerry/winit
+	branch = wayland-dnd
