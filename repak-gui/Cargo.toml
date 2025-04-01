@@ -38,6 +38,3 @@ regex-lite = "0.1.5"
 egui_colors = "0.8.0"
 [build-dependencies]
 winres = "0.1.12"
-
-[patch.crates-io]
-winit = {git = "https://github.com/PeakKS/winit/tree/wayland-dnd",branch = "wayland-dnd"}
