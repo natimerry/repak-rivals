@@ -40,4 +40,4 @@ egui_colors = "0.8.0"
 winres = "0.1.12"
 
 [patch.crates-io]
-winit = {git = "https://github.com/natimerry/winit"}
+winit = {git = "https://github.com/PeakKS/winit/tree/wayland-dnd",branch = "wayland-dnd"}

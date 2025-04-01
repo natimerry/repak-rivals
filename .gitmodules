@@ -1,6 +1,4 @@
 [submodule "uasset-mesh-patch-rivals"]
 	path = uasset-mesh-patch-rivals
 	url = https://github.com/natimerry/uasset-mesh-patch-rivals
-[submodule "winit"]
-	path = winit
-	url = https://github.com/natimerry/winit
+

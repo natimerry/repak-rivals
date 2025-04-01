@@ -6,22 +6,23 @@ mod pak_logic;
 mod utils;
 
 pub mod ios_widget;
+mod color;
 
 use crate::file_table::FileTable;
-use crate::install_mod::{map_dropped_file_to_mods, map_paths_to_mods, InstallableMod, ModInstallRequest, AES_KEY};
+use crate::install_mod::{
+    map_dropped_file_to_mods, map_paths_to_mods, InstallableMod, ModInstallRequest, AES_KEY,
+};
+use crate::pak_logic::extract_pak_to_dir;
 use crate::utils::find_marvel_rivals;
 use crate::utils::get_current_pak_characteristics;
-use eframe::egui::{
-    self, style::Selection, Align, Align2, Button, Color32, IconData, Id, Label, LayerId, Order,
-    RichText, ScrollArea, Stroke, Style, TextEdit, TextStyle, Theme,
-};
+use eframe::egui::{self, style, style::Selection, Align, Align2, Button, Color32, IconData, Id, Label, LayerId, Order, RichText, ScrollArea, Stroke, Style, TextEdit, TextStyle, Theme, Visuals};
 use egui_flex::{item, Flex, FlexAlign};
 use log::{debug, error, info, warn, LevelFilter};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use path_clean::PathClean;
 use repak::PakReader;
 use rfd::{FileDialog, MessageButtons};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode, WriteLogger};
 use std::cell::LazyCell;
 use std::fs::File;
@@ -31,13 +32,13 @@ use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, thread};
-use crate::pak_logic::extract_pak_to_dir;
 
 // use eframe::egui::WidgetText::RichText;
 #[derive(Deserialize, Serialize, Default)]
 struct RepakModManager {
     game_path: PathBuf,
     default_font_size: f32,
+    colorscheme: ColorScheme,
     #[serde(skip)]
     current_pak_file_idx: Option<usize>,
     #[serde(skip)]
@@ -50,7 +51,11 @@ struct RepakModManager {
     install_mod_dialog: Option<ModInstallRequest>,
     #[serde(skip)]
     receiver: Option<Receiver<Event>>,
+
+    #[serde(skip)]
+    receiver_config: Option<Receiver<Event>>,
 }
+
 
 #[derive(Clone)]
 struct PakEntry {
@@ -58,20 +63,17 @@ struct PakEntry {
     path: PathBuf,
     enabled: bool,
 }
-fn use_dark_red_accent(style: &mut Style) {
-    style.visuals.hyperlink_color = Color32::from_hex("#f71034").expect("Invalid color");
-    style.visuals.text_cursor.stroke.color = Color32::from_hex("#941428").unwrap();
-    style.visuals.selection = Selection {
-        bg_fill: Color32::from_rgba_unmultiplied(241, 24, 14, 60),
-        stroke: Stroke::new(1.0, Color32::from_hex("#000000").unwrap()),
-    };
 
-    style.visuals.selection.bg_fill = Color32::from_rgba_unmultiplied(241, 24, 14, 60);
+
+
+impl From<Color32> for CustomColor {
+    fn from(color: Color32) -> Self {
+        CustomColor(color)
+    }
 }
 
-pub fn setup_custom_style(ctx: &egui::Context) {
-    ctx.style_mut_of(Theme::Dark, use_dark_red_accent);
-    ctx.style_mut_of(Theme::Light, use_dark_red_accent);
+pub fn setup_custom_style(background_colors: &ColorScheme, ctx: &egui::Context) {
+    background_colors.apply_egui_style(ctx);
 }
 
 fn set_custom_font_size(ctx: &egui::Context, size: f32) {
@@ -100,17 +102,14 @@ fn set_custom_font_size(ctx: &egui::Context, size: f32) {
     }
     ctx.set_style(style);
 }
-
 impl RepakModManager {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(ctx: &egui::Context) -> Self {
         let game_install_path = find_marvel_rivals();
-
         let mut game_path = PathBuf::new();
         if let Some(path) = game_install_path {
             game_path = path.join("~mods").clean();
             fs::create_dir_all(&game_path).unwrap();
         }
-        setup_custom_style(&cc.egui_ctx);
         let x = Self {
             game_path,
             default_font_size: 18.0,
@@ -119,13 +118,14 @@ impl RepakModManager {
             table: None,
             ..Default::default()
         };
-        set_custom_font_size(&cc.egui_ctx, x.default_font_size);
+        setup_custom_style(&x.colorscheme, &ctx);
+        set_custom_font_size(&ctx, x.default_font_size);
         x
     }
 
     fn collect_pak_files(&mut self) {
-        if !self.game_path.exists() {
-        } else {
+        info!("Collecting pak files");
+        if !self.game_path.exists() {} else {
             let mut vecs = vec![];
 
             for entry in std::fs::read_dir(self.game_path.clone()).unwrap() {
@@ -170,14 +170,14 @@ impl RepakModManager {
         ui.label("Files");
         ui.separator();
         let ctx = ui.ctx();
-        self.preview_files_being_dropped(ctx, ui.available_rect_before_wrap());
+        self.preview_files_being_dropped(ctx, ui.available_rect_before_wrap(),ui.visuals());
 
         if self.current_pak_file_idx.is_none() && ctx.input(|i| i.raw.hovered_files.is_empty()) {
             let rect = ui.available_rect_before_wrap();
             let painter =
                 ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("file_drop_target")));
 
-            let color = ui.style().visuals.faint_bg_color;
+            let color = ui.visuals().faint_bg_color;
             painter.rect_filled(rect, 0.0, color);
             painter.text(
                 rect.center(),
@@ -243,7 +243,9 @@ impl RepakModManager {
                     .strong()
                     .size(self.default_font_size + 1.),
             ));
-            ui.add(Label::new(get_current_pak_characteristics(full_paths.clone()).to_string()));
+            ui.add(Label::new(
+                get_current_pak_characteristics(full_paths.clone()).to_string(),
+            ));
         });
         if self.table.is_none() {
             self.table = Some(FileTable::new(pak, &pak_path));
@@ -274,8 +276,8 @@ impl RepakModManager {
                                     Label::new(
                                         RichText::new(pak_print).strong().background_color(color),
                                     )
-                                    .truncate()
-                                    .selectable(true),
+                                        .truncate()
+                                        .selectable(true),
                                 );
 
                                 if pakfile.clicked() {
@@ -285,7 +287,7 @@ impl RepakModManager {
                                 }
 
                                 pakfile.context_menu(|ui| {
-                                    if ui.button("Extract pak to directory").clicked(){
+                                    if ui.button("Extract pak to directory").clicked() {
                                         self.current_pak_file_idx = Some(i);
                                         let dir = rfd::FileDialog::new().pick_folder();
                                         if let Some(dir) = dir {
@@ -293,21 +295,21 @@ impl RepakModManager {
                                             let to_create = dir.join(&mod_name);
                                             fs::create_dir_all(&to_create).unwrap();
 
-                                            let installable_mod = InstallableMod{
+                                            let installable_mod = InstallableMod {
                                                 mod_name: mod_name.clone(),
                                                 mod_type: "".to_string(),
                                                 reader: Option::from(pak_file.reader.clone()),
                                                 mod_path: pak_file.path.clone(),
                                                 ..Default::default()
                                             };
-                                            if let Err(e) = extract_pak_to_dir(&installable_mod,to_create){
+                                            if let Err(e) = extract_pak_to_dir(&installable_mod, to_create) {
                                                 error!("Failed to extract pak directory: {}",e);
                                             }
                                         }
                                     }
-                                    if ui.button("Delete mod").clicked(){
+                                    if ui.button("Delete mod").clicked() {
                                         let delete_res = fs::remove_file(&pak_file.path);
-                                        if let Err(e)  = delete_res {
+                                        if let Err(e) = delete_res {
                                             error!("Failed to delete pak: {}",e);
                                             return;
                                         }
@@ -376,24 +378,24 @@ impl RepakModManager {
         path
     }
 
-    fn load(ctx: &eframe::CreationContext) -> std::io::Result<Self> {
+    fn load(ctx: &egui::Context) -> std::io::Result<Self> {
         let (tx, rx) = channel();
+        let (tx_config, rx_config) = channel();
+
         let path = Self::config_path();
         let mut shit = if path.exists() {
             info!("Loading config: {}", path.to_string_lossy());
             let data = fs::read_to_string(path)?;
             let mut config: Self = serde_json::from_str(&data)?;
 
-            debug!("Setting custom style");
-            setup_custom_style(&ctx.egui_ctx);
             debug!("Setting font size: {}", config.default_font_size);
-            set_custom_font_size(&ctx.egui_ctx, config.default_font_size);
+            set_custom_font_size(&ctx, config.default_font_size);
 
             info!("Loading mods: {}", config.game_path.to_string_lossy());
             config.collect_pak_files();
 
             config.receiver = Some(rx);
-
+            config.receiver_config = Some(rx_config);
             Ok(config)
         } else {
             info!(
@@ -402,31 +404,45 @@ impl RepakModManager {
             );
             let mut x = Self::new(ctx);
             x.receiver = Some(rx);
+            x.receiver_config = Some(rx_config);
             Ok(x)
         };
 
-        if let Ok(ref mut shit) = shit {
-            let path = shit.game_path.clone();
+        if let Ok(ref mut modman) = shit {
+            let path = modman.game_path.clone();
             thread::spawn(move || {
                 let mut watcher: RecommendedWatcher = notify::recommended_watcher(move |res| {
                     if let Ok(event) = res {
                         tx.send(event).unwrap();
                     }
                 })
-                .unwrap();
+                    .unwrap();
+
+                let mut watcher2: RecommendedWatcher = notify::recommended_watcher(move |res2| {
+                    if let Ok(event) = res2 {
+                        tx_config.send(event).unwrap();
+                    }
+                })
+                    .unwrap();
 
                 if path.exists() {
-                    watcher
-                        .watch(&path, RecursiveMode::Recursive)
+                    watcher.watch(&path, RecursiveMode::Recursive).unwrap();
+                }
+
+                let config_path = Self::config_path();
+                if config_path.exists() {
+                    watcher2
+                        .watch(&*Self::config_path().parent().unwrap(), RecursiveMode::Recursive)
                         .unwrap();
                 }
-                
-                // Keep the thread alive
+
                 loop {
-                    thread::sleep(Duration::from_secs(1));
+                    thread::sleep(Duration::from_millis(100));
                 }
             });
-            shit.collect_pak_files();
+            setup_custom_style(&modman.colorscheme,ctx);
+            modman.collect_pak_files();
+
         }
 
         shit
@@ -440,7 +456,7 @@ impl RepakModManager {
     }
 
     /// Preview hovering files:
-    fn preview_files_being_dropped(&self, ctx: &egui::Context, rect: egui::Rect) {
+    fn preview_files_being_dropped(&self, ctx: &egui::Context, rect: egui::Rect,visuals: &Visuals) {
         use egui::{Align2, Color32, Id, LayerId, Order, TextStyle};
 
         if !ctx.input(|i| i.raw.hovered_files.is_empty()) {
@@ -451,7 +467,7 @@ impl RepakModManager {
                 true => "Drop mod files here",
                 false => "Choose a game directory first!!!",
             };
-            painter.rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(241, 24, 14, 40));
+            painter.rect_filled(rect, 0.0, visuals.selection.bg_fill);
             painter.text(
                 rect.center(),
                 Align2::CENTER_CENTER,
@@ -595,12 +611,13 @@ impl RepakModManager {
                 if browse_button.clicked() {
                     if let Some(path) = FileDialog::new().pick_folder() {
                         self.game_path = path;
+                        self.collect_pak_files();
                     }
                 }
                 flex_ui.add_ui(item(), |ui| {
                     let x = ui.add_enabled(self.game_path.exists(), Button::new("Open mod folder"));
                     if x.clicked() {
-                        println!("Opening mod folder: {}", self.game_path.to_string_lossy());
+                        info!("Opening mod folder: {}", self.game_path.to_string_lossy());
                         #[cfg(target_os = "windows")]
                         {
                             let process = std::process::Command::new("explorer.exe")
@@ -614,7 +631,6 @@ impl RepakModManager {
                                 info!("Opened mod folder: {}", self.game_path.to_string_lossy());
                             }
                             process.unwrap().wait().unwrap();
-
                         }
 
                         #[cfg(target_os = "linux")]
@@ -631,7 +647,7 @@ impl RepakModManager {
 }
 impl eframe::App for RepakModManager {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let mut collect_pak = false;
+        let mut collect_paks = false;
 
         if !self.file_drop_viewport_open && self.install_mod_dialog.is_some() {
             self.install_mod_dialog = None;
@@ -647,7 +663,22 @@ impl eframe::App for RepakModManager {
                         EventKind::Other => {}
                         _ => {
                             debug!("Received event {:?}", event.kind);
-                            collect_pak = true;
+                            collect_paks = true;
+                        }
+                    }
+                }
+            }
+
+            if let Some(ref receiver) = &self.receiver_config {
+                while let Ok(event) = receiver.try_recv() {
+                    match event.kind {
+                        EventKind::Any => {
+                            warn!("Unknown event received")
+                        }
+                        EventKind::Other => {}
+                        _ => {
+                            debug!("Received event {:?}", event.kind);
+                            self.colorscheme = RepakModManager::load(&ctx).unwrap_or_default().colorscheme;
                         }
                     }
                 }
@@ -655,8 +686,7 @@ impl eframe::App for RepakModManager {
         }
         // if install_mod_dialog is open we dont want to listen to events
 
-        if collect_pak {
-            info!("Collecting pak files");
+        if collect_paks {
             self.collect_pak_files();
         }
 
@@ -718,7 +748,6 @@ const ICON: LazyCell<Arc<IconData>> = LazyCell::new(|| {
     Arc::new(d)
 });
 
-
 #[cfg(target_os = "windows")]
 fn free_console() -> bool {
     unsafe { FreeConsole() == 0 }
@@ -732,14 +761,19 @@ fn is_console() -> bool {
     }
 }
 #[cfg(target_os = "windows")]
-#[link(name="Kernel32")]
+#[link(name = "Kernel32")]
 extern "system" {
     fn GetConsoleProcessList(processList: *mut u32, count: u32) -> u32;
     fn FreeConsole() -> i32;
 }
+use egui_colors::tokens::ThemeColor;
+use egui_colors::utils::EGUI_THEME;
+use egui_colors::Colorix;
 #[allow(unused_imports)]
 #[cfg(target_os = "windows")]
 use std::panic::PanicHookInfo;
+use eframe::epaint;
+use crate::color::{ColorScheme, CustomColor};
 
 #[cfg(target_os = "windows")]
 #[cfg(not(debug_assertions))]
@@ -748,7 +782,7 @@ fn custom_panic(_info: &PanicHookInfo) -> ! {
         "Repak has crashed. Please report this issue to the developer with the following information:\
 \n\n{}\
 \nAdditonally include the log file in the bug report"
-        ,_info);
+        , _info);
 
     let _x = rfd::MessageDialog::new()
         .set_title("Repak has crashed")
@@ -785,7 +819,7 @@ fn main() {
         ),
         WriteLogger::new(LevelFilter::Info, Config::default(), log_file),
     ])
-    .expect("Failed to initialize logger");
+        .expect("Failed to initialize logger");
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -803,9 +837,9 @@ fn main() {
             cc.egui_ctx
                 .style_mut(|style| style.visuals.dark_mode = true);
             Ok(Box::new(
-                RepakModManager::load(cc).expect("Unable to load config"),
+                RepakModManager::load(&cc.egui_ctx).expect("Unable to load config"),
             ))
         }),
     )
-    .expect("Unable to spawn windows");
+        .expect("Unable to spawn windows");
 }
