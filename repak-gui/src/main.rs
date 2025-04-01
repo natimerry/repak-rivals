@@ -38,6 +38,7 @@ use std::{fs, thread};
 struct RepakModManager {
     game_path: PathBuf,
     default_font_size: f32,
+    #[serde(default)]
     colorscheme: ColorScheme,
     #[serde(skip)]
     current_pak_file_idx: Option<usize>,
@@ -793,6 +794,12 @@ fn custom_panic(_info: &PanicHookInfo) -> ! {
 }
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    unsafe {
+        std::env::set_var("WINIT_UNIX_BACKEND", "x11");
+        std::env::remove_var("WAYLAND_DISPLAY");
+    }
+
     #[cfg(target_os = "windows")]
     if !is_console() {
         free_console();
