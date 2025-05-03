@@ -1,5 +1,5 @@
 use crate::pak_logic::install_mods_in_viewport;
-use crate::{setup_custom_style, ICON};
+use crate::{ICON};
 use crate::utils::get_current_pak_characteristics;
 use eframe::egui;
 use eframe::egui::{Align, Checkbox, ComboBox, Context, Label, TextEdit};
@@ -76,7 +76,6 @@ impl ModInstallRequest {
                     "This egui backend doesn't support multiple viewports"
                 );
 
-                setup_custom_style(ctx);
                 egui::CentralPanel::default().show(ctx, |ui| {
                     ui.label("Mods to install");
                     ui.set_min_width(ui.available_width());

@@ -17,4 +17,4 @@ pr-run-mode = "plan"
 install-path = "CARGO_HOME"
 # Whether to install an updater program
 install-updater = false
-# Whether to install an updater program
+release-notes = "CHANGELOG.md"
