@@ -1,3 +1,4 @@
+use std::io;
 use crate::{error::BnkResult, utils::*};
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::Cursor;
@@ -13,7 +14,7 @@ pub struct BnkHeader {
 }
 
 impl BnkHeader {
-    pub fn parse(cursor: &mut Cursor<&[u8]>) -> BnkResult<Self> {
+    pub fn parse<R: io::Read + io::Seek>(cursor: &mut R) -> BnkResult<Self> {
         let magic = read_fourcc(cursor)?;
         if &magic != b"BKHD" {
             return Err(BnkError::InvalidMagic);

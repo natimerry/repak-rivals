@@ -1,8 +1,9 @@
+use std::io;
 use crate::error::{BnkResult};
 use byteorder::{ReadBytesExt};
 use std::io::{Cursor, Read};
 
-pub fn read_fourcc(cursor: &mut Cursor<&[u8]>) -> BnkResult<[u8; 4]> {
+pub fn read_fourcc<R: io::Read + io::Seek>(cursor: &mut R) -> BnkResult<[u8; 4]> {
     let mut fourcc = [0u8; 4];
     cursor.read_exact(&mut fourcc)?;
     Ok(fourcc)

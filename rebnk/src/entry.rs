@@ -1,3 +1,4 @@
+use std::io;
 use crate::{
     error::BnkResult,
     header::BnkHeader,
@@ -10,14 +11,9 @@ pub struct BnkEntry {
 }
 
 impl BnkEntry {
-    pub fn from_file(path: &str) -> BnkResult<Self> {
-        let data = std::fs::read(path)?;
-        Self::parse(&data)
-    }
-
-    pub fn parse(data: &[u8]) -> BnkResult<Self> {
-        let mut cursor = Cursor::new(data);
-        let header = BnkHeader::parse(&mut cursor)?;
+    
+    pub fn parse<R: io::Read + io::Seek>(reader: &mut R) -> BnkResult<Self> {
+        let header = BnkHeader::parse(reader)?;
         Ok(BnkEntry {
             header
         })
