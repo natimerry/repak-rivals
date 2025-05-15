@@ -1,4 +1,3 @@
-use std::io::Read;
 use rebnk::{BnkHeader};
 use std::path::Path;
 #[test]
@@ -12,11 +11,11 @@ fn test_read_header_from_file() {
 
     println!("Reading header from file: {:?}", test_file);
     let mut file = std::fs::File::open(test_file).unwrap();
-    let mut buffer = vec![0u8; 256];
-    let bytes_read = file.read(&mut buffer).unwrap();
-    let buffer = &buffer[..bytes_read];
+    // let mut buffer = vec![0u8; 256];
+    // let bytes_read = file.read(&mut buffer).unwrap();
+    // let buffer = &buffer[..bytes_read];
 
-    match BnkHeader::parse(&mut std::io::Cursor::new(buffer)) {
+    match BnkHeader::parse(&mut file) {
         Ok(header) => {
             println!("Successfully parsed header from file:");
             println!("Magic: {:02X?}, {}", header.magic, String::from_utf8_lossy(&header.magic));

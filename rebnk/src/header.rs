@@ -1,7 +1,6 @@
 use std::io;
 use crate::{error::BnkResult, utils::*};
 use byteorder::{LittleEndian, ReadBytesExt};
-use std::io::Cursor;
 use crate::error::BnkError;
 
 #[derive(Debug)]

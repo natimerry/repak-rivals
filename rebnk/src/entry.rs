@@ -3,7 +3,6 @@ use crate::{
     error::BnkResult,
     header::BnkHeader,
 };
-use std::io::Cursor;
 
 #[derive(Debug)]
 pub struct BnkEntry {
