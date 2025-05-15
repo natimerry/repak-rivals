@@ -1,24 +1,18 @@
 use std::io;
-use crate::{error::BnkResult, utils::*};
+use crate::error::BnkResult;
 use byteorder::{LittleEndian, ReadBytesExt};
-use crate::error::BnkError;
 
 #[derive(Debug)]
 pub struct BnkHeader {
-    pub magic: [u8; 4],
     pub size: u32,
     pub version: u32,
     pub soundbank_id: u32,
     pub language_id: u32,
+    unknown_data: Vec<u8>,
 }
 
 impl BnkHeader {
-    pub fn parse<R: io::Read + io::Seek>(cursor: &mut R) -> BnkResult<Self> {
-        let magic = read_fourcc(cursor)?;
-        if &magic != b"BKHD" {
-            return Err(BnkError::InvalidMagic);
-        }
-        
+    pub fn read_header<R: io::Read + io::Seek>(cursor: &mut R) -> BnkResult<Self> {
         let size = cursor.read_u32::<LittleEndian>()?;
         let version = cursor.read_u32::<LittleEndian>()?;
         if version >= 72 {
@@ -26,17 +20,16 @@ impl BnkHeader {
         }
         let soundbank_id = cursor.read_u32::<LittleEndian>()?;
         let language_id = cursor.read_u32::<LittleEndian>()?;
-        
-        let bytes_read = 4 + 4 + 4 +4 + if version >= 112 { 1 } else { 0 };
-        for _ in bytes_read..size {
-            cursor.read_u8()?;
-        }
+
+        let bytes_read = 16;
+        let mut final_bytes = vec![0u8; size as usize - bytes_read];
+        cursor.read_exact(&mut final_bytes)?;
         Ok(Self {
-            magic,
             size,
             version,
             soundbank_id,
             language_id,
+            unknown_data: final_bytes,
         })
     }
 }

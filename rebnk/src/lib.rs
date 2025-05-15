@@ -1,10 +1,8 @@
 extern crate core;
 
 pub mod error;
-pub mod entry;
-pub mod header;
+pub mod wwise_reader;
 pub mod utils;
+mod sections;
 
 pub use error::{BnkError, BnkResult};
-pub use entry::BnkEntry;
-pub use header::BnkHeader;
