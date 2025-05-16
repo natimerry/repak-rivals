@@ -43,6 +43,7 @@ fn test_read_didx_from_file() {
     let reader = WwiseReader::new(&mut file);
     let didx = reader.unwrap().didx;
     println!("Successfully parsed didx from file:");
-    println!("Size: {} entries", didx.size);
     println!("{:?}", didx.entries);
+    println!("Size: {} entries", didx.size);
+    println!("Number of WEM files: {}",didx.entries.len());
 }
