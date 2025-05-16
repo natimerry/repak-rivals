@@ -2,7 +2,7 @@ use crate::error::BnkResult;
 use crate::sections::header::BnkHeader;
 use crate::utils::read_magic;
 use std::io;
-use std::io::Seek;
+use crate::sections::didx::BnkDataIndex;
 
 #[derive(Debug)]
 pub struct WwiseReader {
@@ -10,6 +10,7 @@ pub struct WwiseReader {
     index_offset: usize,
     data_offset: usize,
     hirc_offset: usize,
+    pub didx: BnkDataIndex,
 }
 
 impl WwiseReader {
@@ -19,19 +20,20 @@ impl WwiseReader {
 
         let mut current_offset = reader.seek(io::SeekFrom::Start(0))?;
         let mut header: Option<BnkHeader> = None;
-
+        let mut didx: Option<BnkDataIndex> = None;
         let mut index_offset = 0;
         let mut datas_offset = 0;
         let mut hirc_offset = 0;
 
         while current_offset < file_size {
             let magic_number = read_magic(reader).expect("Failed to read magic number");
-            
+
             match magic_number {
                 [0x42, 0x4B, 0x48, 0x44] => {
                     header = Some(BnkHeader::read_header(reader)?);
                 }
                 [0x44, 0x49, 0x44, 0x58] => {
+                    didx = Some(BnkDataIndex::read_didx(reader)?);
                     index_offset = current_offset;
                 }
 
@@ -46,14 +48,15 @@ impl WwiseReader {
                     break;
                 }
             }
-            current_offset = reader.seek(io::SeekFrom::Current(0)).unwrap();
+            current_offset = reader.seek(io::SeekFrom::Current(0))?;
         }
         Ok(Self {
             header: header.unwrap(),
+            didx: didx.unwrap(),
             index_offset: index_offset as usize,
             data_offset: datas_offset as usize,
             hirc_offset: hirc_offset as usize,
         })
     }
-    
+
 }
