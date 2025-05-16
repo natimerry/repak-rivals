@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use crate::error::BnkResult;
 use crate::BnkError;
 use byteorder::{LittleEndian, ReadBytesExt};
@@ -5,7 +6,7 @@ use std::io::{Read, Seek};
 
 #[derive(Debug)]
 pub struct BnkDataIndex {
-    pub entries: Vec<WemEntry>,
+    pub entries: HashMap<u32,WemEntry>,
     pub size: u32,
 }
 
@@ -25,14 +26,14 @@ impl BnkDataIndex {
         }
         
         let entry_count = section_length / 12;
-        let mut entries = Vec::with_capacity(entry_count as usize);
+        let mut entries = HashMap::with_capacity(entry_count as usize);
 
         for _ in 0..entry_count {
             let id = cursor.read_u32::<LittleEndian>()?;
             let offset = cursor.read_u32::<LittleEndian>()?;
             let wem_length = cursor.read_u32::<LittleEndian>()?;
-
-            entries.push(WemEntry {
+            
+            entries.insert(id, WemEntry {
                 id,
                 offset,
                 wem_length,
