@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::Path;
 use rebnk::wwise_reader::WwiseReader;
 
@@ -46,4 +47,22 @@ fn test_read_didx_from_file() {
     println!("{:?}", didx.entries);
     println!("Size: {} entries", didx.size);
     println!("Number of WEM files: {}",didx.entries.len());
+}
+
+#[test]
+fn extract_audio_from_file() {
+    let test_file = Path::new("test_files/example.bnk");
+    if !test_file.exists() {
+        eprintln!("Note: Skipping file-based audio extraction test - test file not found at {:?}", test_file);
+        return;
+    }
+
+    let mut file = std::fs::File::open(test_file).unwrap();
+
+
+    let reader = WwiseReader::new(&mut file).expect("WTF");
+    let mut writer = std::fs::File::create("test_files/example.wem").unwrap();
+
+    let data = reader.get_wem_data(19941098, &mut file).expect("Unable to get WEM data");
+    writer.write_all(&data).expect("Unable to write WEM data to file")
 }

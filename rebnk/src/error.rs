@@ -23,6 +23,9 @@ pub enum BnkError {
 
     #[error("Checksum mismatch")]
     ChecksumMismatch,
+    
+    #[error("Invalid ID requested")]
+    InvalidId,
 }
 
 pub type BnkResult<T> = Result<T, BnkError>;
