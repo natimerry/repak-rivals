@@ -37,7 +37,7 @@ simplelog = "0.12.2"
 regex-lite = "0.1.5"
 retoc = {path = "../retoc-rivals"}
 unrar = "0.5.8"
-zip = "2.6.1"
+zip = "4.3.0"
 walkdir = "2.5.0"
 [build-dependencies]
 winres = "0.1.12"
