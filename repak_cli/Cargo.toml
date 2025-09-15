@@ -43,7 +43,7 @@ uasset-mesh-patch-rivals = { path = "../uasset-mesh-patch-rivals" }
 assert_cmd = "2.0.16"
 dir-diff = "0.3.3"
 indoc = "2.0.5"
-tempfile = "3.16.0"
+tempfile = "3.22.0"
 
 [package.metadata.dist]
 include = [
