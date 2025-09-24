@@ -15,7 +15,9 @@ use eframe::egui::{
 use log::LevelFilter;
 use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode, WriteLogger};
 use std::cell::LazyCell;
+use std::env::{args, Args};
 use std::fs::File;
+use std::process::exit;
 use std::sync::Arc;
 
 use crate::main_ui::RepakModManager;
@@ -76,6 +78,20 @@ fn main() {
         custom_panic(info.into());
     }));
 
+    /*
+        Custom baked CLI utility for tobi, if the program detects a specific argument passed to it, it does not spaw GUI
+    */
+
+    let args = args().collect::<Vec<String>>();
+    if args[1] == "--extract"{
+        for file in &args[1..]{
+            todo!()
+        }
+        exit(0);
+    }
+
+    // This forces repak gui to use the XWAYLAND backend instead of the wayland as wayland backend is half baked as shit
+    // and doesnt support icons and drag and drop
     unsafe {
         #[cfg(target_os = "linux")]
         std::env::set_var("WINIT_UNIX_BACKEND", "x11");
