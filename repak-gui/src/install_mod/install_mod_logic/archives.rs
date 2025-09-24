@@ -44,7 +44,7 @@ pub fn extract_rar(rar_path: &str, output_dir: &str) -> Result<(), unrar::error:
     Ok(())
 }
 
-pub fn rar_length(rar_path: &str) -> Result<usize, unrar::error::UnrarError> {
+pub fn _rar_length(rar_path: &str) -> Result<usize, unrar::error::UnrarError> {
     let archive =
         Archive::new(rar_path)
             .open_for_listing()?;
@@ -53,7 +53,7 @@ pub fn rar_length(rar_path: &str) -> Result<usize, unrar::error::UnrarError> {
 }
 
 
-pub fn zip_length(zip_path: &str) -> Result<usize, io::Error> {
+pub fn _zip_length(zip_path: &str) -> Result<usize, io::Error> {
     let file = File::open(zip_path)?;
     let archive = ZipArchive::new(file)?;
     Ok(archive.len())

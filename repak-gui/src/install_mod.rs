@@ -1,7 +1,6 @@
 pub mod install_mod_logic;
 
 use crate::install_mod::install_mod_logic::archives::*;
-use crate::install_mod::install_mod_logic::pak_files::create_repak_from_pak;
 use crate::main_ui::setup_custom_style;
 use crate::utils::{collect_files, get_current_pak_characteristics};
 use crate::utoc_utils::read_utoc;
@@ -15,15 +14,14 @@ use log::{debug, error};
 use repak::utils::AesKey;
 use repak::Compression::Oodle;
 use repak::{Compression, PakReader};
-use serde::de::Unexpected::Str;
 use std::fs::File;
 use std::io::BufReader;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicBool, AtomicI32};
 use std::sync::{Arc, LazyLock};
-use std::{fs, thread};
+use std::thread;
 use tempfile::tempdir;
 use walkdir::WalkDir;
 

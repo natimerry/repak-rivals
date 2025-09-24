@@ -157,7 +157,7 @@ impl RepakModManager {
 
                 let mut builder = repak::PakBuilder::new();
                 builder = builder.key(AES_KEY.clone().0);
-                let pak = builder.reader(&mut BufReader::new(File::open(path.clone()).unwrap()));
+                let pak = builder.reader(&mut BufReader::new(File::open(path).unwrap()));
 
                 if let Err(_e) = pak {
                     warn!("Error opening pak file");

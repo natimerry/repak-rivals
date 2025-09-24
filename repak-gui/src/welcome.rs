@@ -1,7 +1,7 @@
 use crate::main_ui::setup_custom_style;
 use crate::ICON;
 use eframe::egui;
-use eframe::egui::{Color32, Context, Rect, RichText};
+use eframe::egui::{Color32, Context, RichText};
 use log::debug;
 
 struct Contributer {
@@ -63,11 +63,10 @@ fn show_support_section(ui: &mut egui::Ui) {
     let body_color = egui::Color32::WHITE;
     let highlight_color = egui::Color32::from_rgb(255, 220, 120); // highlight
 
-    let available_size = ui.available_size(); // Get remaining space
     egui::Frame::group(ui.style())
         .fill(egui::Color32::from_rgb(30, 30, 30))
         .stroke(egui::Stroke::new(1.0, egui::Color32::DARK_GRAY))
-        .rounding(egui::Rounding::same(12))
+        .corner_radius(egui::CornerRadius::same(12))
         .inner_margin(egui::Margin::same(12))
         .outer_margin(egui::Margin::same(8))
         .show(ui, |mut ui| {
@@ -142,7 +141,7 @@ impl ShowWelcome {
             ctx,
             egui::ViewportId::from_hash_of("immediate_viewport"),
             viewport_options,
-            |ui, class| {
+            |_ui, class| {
                 assert!(
                     class == egui::ViewportClass::Immediate,
                     "This egui backend doesn't support multiple viewports"

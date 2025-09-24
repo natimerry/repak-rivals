@@ -3,12 +3,10 @@ pub mod iotoc;
 pub mod pak_files;
 pub mod patch_meshes;
 
-use crate::install_mod::install_mod_logic::archives::*;
 use crate::install_mod::InstallableMod;
 use iotoc::convert_to_iostore_directory;
 use log::{error, info, warn};
 use pak_files::create_repak_from_pak;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
