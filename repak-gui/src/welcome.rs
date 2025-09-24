@@ -1,4 +1,5 @@
-use crate::{setup_custom_style, ICON};
+use crate::main_ui::setup_custom_style;
+use crate::ICON;
 use eframe::egui;
 use eframe::egui::{Color32, Context, Rect, RichText};
 use log::debug;

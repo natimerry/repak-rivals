@@ -2,9 +2,10 @@ pub mod install_mod_logic;
 
 use crate::install_mod::install_mod_logic::archives::*;
 use crate::install_mod::install_mod_logic::pak_files::create_repak_from_pak;
+use crate::main_ui::setup_custom_style;
 use crate::utils::{collect_files, get_current_pak_characteristics};
 use crate::utoc_utils::read_utoc;
-use crate::{setup_custom_style, ICON};
+use crate::ICON;
 use eframe::egui;
 use eframe::egui::{Align, Checkbox, ComboBox, Context, Label, TextEdit};
 use egui_extras::{Column, TableBuilder};
