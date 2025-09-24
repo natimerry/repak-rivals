@@ -1,17 +1,15 @@
 extern crate core;
 
-mod main_ui;
 mod file_table;
 mod install_mod;
+mod main_ui;
 mod utils;
 
 pub mod ios_widget;
 mod utoc_utils;
 mod welcome;
 
-use eframe::egui::{
-    self, IconData,
-};
+use eframe::egui::{self, IconData};
 use log::LevelFilter;
 use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode, WriteLogger};
 use std::cell::LazyCell;
@@ -83,11 +81,13 @@ fn main() {
     */
 
     let args = args().collect::<Vec<String>>();
-    if args[1] == "--extract"{
-        for _file in &args[1..]{
-            todo!()
+    if args.len() > 1 {
+        if args[1] == "--extract" {
+            for _file in &args[1..] {
+                todo!()
+            }
+            exit(0);
         }
-        exit(0);
     }
 
     // This forces repak gui to use the XWAYLAND backend instead of the wayland as wayland backend is half baked as shit
