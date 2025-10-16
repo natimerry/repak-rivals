@@ -23,6 +23,9 @@ use std::sync::Arc;
 
 use crate::main_ui::RepakModManager;
 
+#[cfg(target_os = "windows")]
+use {rfd::MessageButtons, std::panic::PanicHookInfo};
+
 const ICON: LazyCell<Arc<IconData>> = LazyCell::new(|| {
     let d = eframe::icon_data::from_png_bytes(include_bytes!(
         "../../repak-gui/icons/RepakLogoNonCurveFadedRed-modified.png"
