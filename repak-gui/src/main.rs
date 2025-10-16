@@ -10,7 +10,7 @@ mod utoc_utils;
 mod welcome;
 
 use eframe::egui::{self, IconData};
-use log::LevelFilter;
+use log::{info, LevelFilter};
 use retoc::{action_unpack, ActionUnpack, FGuid};
 use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode, WriteLogger};
 use std::cell::LazyCell;
@@ -86,11 +86,13 @@ fn main() {
     let args = args().collect::<Vec<String>>();
     if args.len() > 1 {
         if args[1] == "--extract" {
-            for _file in &args[1..] {
+            for _file in &args[2..] {
                 // create a new directory for unpacking
                 let path = PathBuf::from(&_file);
-                let root = path.file_name().unwrap().to_str().unwrap();
+                let root = path.file_stem().unwrap().to_str().unwrap();
                 let result_path = path.parent().unwrap().join(root);
+                println!("Creating directory: {:?}", &result_path);
+
                 let _ = create_dir(&result_path).expect("Failed to create extraction directory");
                 // build an action
                 let action: ActionUnpack = ActionUnpack {
@@ -112,7 +114,7 @@ fn main() {
                 config.aes_keys.insert(FGuid::default(), aes_toc.clone());
                 let config = Arc::new(config);
 
-                action_unpack(action, config);
+                action_unpack(action, config).expect("Failed to extract");
             }
             exit(0);
         }
