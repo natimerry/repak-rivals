@@ -16,7 +16,7 @@ use std::fs::File;
 use path_slash::PathExt;
 
 
-pub fn convert_to_iostore_directory(
+pub fn convert_directory_to_iostore(
     pak: &InstallableMod,
     mod_dir: PathBuf,
     to_pak_dir: PathBuf,
