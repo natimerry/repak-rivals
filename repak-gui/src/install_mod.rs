@@ -417,7 +417,7 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
     new_mods
 }
 
-fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
+pub fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
     let mut extensible_vec: Vec<InstallableMod> = Vec::new();
     let mut installable_mods = paths
         .iter()
