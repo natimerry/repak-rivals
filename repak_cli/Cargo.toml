@@ -42,7 +42,7 @@ uasset-mesh-patch-rivals = { path = "../uasset-mesh-patch-rivals" }
 [dev-dependencies]
 assert_cmd = "2.0.16"
 dir-diff = "0.3.3"
-indoc = "2.0.5"
+indoc = "2.0.7"
 tempfile = "3.16.0"
 
 [package.metadata.dist]
