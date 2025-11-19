@@ -9,16 +9,24 @@ pub mod ios_widget;
 mod utoc_utils;
 mod welcome;
 
+use crate::main_ui::RepakModManager;
 use eframe::egui::{self, IconData};
-use log::LevelFilter;
+use log::{info, LevelFilter};
+use retoc::{action_unpack, ActionUnpack, FGuid};
 use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode, WriteLogger};
 use std::cell::LazyCell;
 use std::env::args;
-use std::fs::File;
+use std::fs::{create_dir, File};
+use std::path::PathBuf;
 use std::process::exit;
+use std::str::FromStr;
+use std::sync::atomic::AtomicI32;
 use std::sync::Arc;
 
-use crate::main_ui::RepakModManager;
+use crate::install_mod::install_mod_logic::iotoc::convert_directory_to_iostore;
+use crate::install_mod::map_to_mods_internal;
+#[cfg(target_os = "windows")]
+use {rfd::MessageButtons, std::panic::PanicHookInfo};
 
 const ICON: LazyCell<Arc<IconData>> = LazyCell::new(|| {
     let d = eframe::icon_data::from_png_bytes(include_bytes!(
@@ -83,8 +91,55 @@ fn main() {
     let args = args().collect::<Vec<String>>();
     if args.len() > 1 {
         if args[1] == "--extract" {
-            for _file in &args[1..] {
-                todo!()
+            for _file in &args[2..] {
+                // create a new directory for unpacking
+                let path = PathBuf::from(&_file);
+                let root = path.file_stem().unwrap().to_str().unwrap();
+                let result_path = path.parent().unwrap().join(root);
+                println!("Creating directory: {:?}", &result_path);
+
+                let _ = create_dir(&result_path).expect("Failed to create extraction directory");
+                // build an action
+                let action: ActionUnpack = ActionUnpack {
+                    utoc: PathBuf::from(&_file),
+                    output: result_path,
+                    verbose: true,
+                };
+
+                let mut config = retoc::Config {
+                    container_header_version_override: None,
+                    ..Default::default()
+                };
+
+                let aes_toc = retoc::AesKey::from_str(
+                    "0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74",
+                )
+                .unwrap();
+
+                config.aes_keys.insert(FGuid::default(), aes_toc.clone());
+                let config = Arc::new(config);
+
+                action_unpack(action, config).expect("Failed to extract");
+            }
+            exit(0);
+        }
+        if args[1] == "--pack" {
+            let paths = args[2..]
+                .iter()
+                .map(|path| PathBuf::from_str(path).unwrap())
+                .filter(|path| path.is_dir())
+                .collect::<Vec<_>>();
+            let installable_mods = map_to_mods_internal(&paths);
+            for (i, installable) in installable_mods.iter().enumerate() {
+                let mod_dir = paths[i].parent().unwrap();
+                let count = AtomicI32::new(0);
+                convert_directory_to_iostore(
+                    &installable,
+                    mod_dir.to_path_buf(),
+                    paths[i].clone(),
+                    &count,
+                )
+                .expect("Failed to convert directory");
             }
             exit(0);
         }

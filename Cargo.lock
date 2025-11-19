@@ -1671,9 +1671,9 @@ dependencies = [
 
 [[package]]
 name = "flate2"
-version = "1.1.4"
+version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc5a4e564e38c699f2880d3fda590bedc2e69f3f84cd48b457bd892ce61d0aa9"
+checksum = "bfe33edd8e85a12a67454e37f8c75e730830d83e313556ab9ebf9ee7fbeb3bfb"
 dependencies = [
  "crc32fast",
  "libz-rs-sys",
@@ -2347,9 +2347,12 @@ dependencies = [
 
 [[package]]
 name = "indoc"
-version = "2.0.6"
+version = "2.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4c7245a08504955605670dbf141fceab975f15ca21570696aebe9d2e71576bd"
+checksum = "79cf5c93f93228cf8efb3ba362535fb11199ac548a09ce117c9b1adc3030d706"
+dependencies = [
+ "rustversion",
+]
 
 [[package]]
 name = "inotify"
@@ -3112,13 +3115,13 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.20.3"
+version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "945462a4b81e43c4e3ba96bd7b49d834c6f61198356aa858733bc4acf3cbe62e"
+checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
 name = "oodle_loader"
-version = "2.5.6"
+version = "2.5.8"
 dependencies = [
  "hex",
  "libloading",
@@ -3628,7 +3631,7 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "repak"
-version = "2.5.6"
+version = "2.5.8"
 dependencies = [
  "aes",
  "base64 0.22.1",
@@ -3647,7 +3650,7 @@ dependencies = [
 
 [[package]]
 name = "repak-gui"
-version = "2.5.6"
+version = "2.5.8"
 dependencies = [
  "colored",
  "dirs",
@@ -3678,7 +3681,7 @@ dependencies = [
 
 [[package]]
 name = "repak_cli"
-version = "2.5.6"
+version = "2.5.8"
 dependencies = [
  "aes",
  "assert_cmd",
@@ -4044,7 +4047,7 @@ checksum = "d66dc143e6b11c1eddc06d5c423cfc97062865baf299914ab64caa38182078fe"
 
 [[package]]
 name = "simd_str_cmp"
-version = "2.5.6"
+version = "2.5.8"
 dependencies = [
  "criterion",
  "once_cell",

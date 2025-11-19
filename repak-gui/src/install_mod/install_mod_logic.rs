@@ -4,7 +4,7 @@ pub mod pak_files;
 pub mod patch_meshes;
 
 use crate::install_mod::InstallableMod;
-use iotoc::convert_to_iostore_directory;
+use iotoc::convert_directory_to_iostore;
 use log::{error, info, warn};
 use pak_files::create_repak_from_pak;
 use std::path::{Path, PathBuf};
@@ -71,7 +71,7 @@ pub fn install_mods_in_viewport(
         }
 
         if installable_mod.is_dir {
-            let res = convert_to_iostore_directory(
+            let res = convert_directory_to_iostore(
                 installable_mod,
                 PathBuf::from(&mod_directory),
                 PathBuf::from(&installable_mod.mod_path),

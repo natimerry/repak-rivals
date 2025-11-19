@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicI32;
 use tempfile::tempdir;
 
-use super::iotoc::convert_to_iostore_directory;
+use super::iotoc::convert_directory_to_iostore;
 
 pub fn extract_pak_to_dir(pak: &InstallableMod, install_dir: PathBuf) -> Result<(), repak::Error> {
     let pak_reader = pak.clone().reader.clone().unwrap();
@@ -87,7 +87,7 @@ pub fn create_repak_from_pak(
     let temp_path = temp_dir.path(); // Get the path of the temporary directory
 
     extract_pak_to_dir(pak, temp_path.to_path_buf())?;
-    convert_to_iostore_directory(
+    convert_directory_to_iostore(
         pak,
         mod_dir.clone(),
         temp_path.to_path_buf(),
