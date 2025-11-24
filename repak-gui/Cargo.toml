@@ -16,7 +16,7 @@ eula = false
 
 [dependencies]
 eframe = "0.31.1"
-egui_flex = "0.3.0"
+egui_flex = "0.4.0"
 rfd = "0.15.2"
 log = "0.4.26"
 repak = { path = "../repak" ,features = ["oodle","encryption"]}
