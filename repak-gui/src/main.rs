@@ -9,12 +9,15 @@ pub mod ios_widget;
 mod utoc_utils;
 mod welcome;
 
+use crate::install_mod::install_mod_logic::iotoc::convert_directory_to_iostore;
+use crate::install_mod::map_to_mods_internal;
 use crate::main_ui::RepakModManager;
 use eframe::egui::{self, IconData};
-use log::{info, LevelFilter};
+use log::LevelFilter;
 use retoc::{action_unpack, ActionUnpack, FGuid};
 use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode, WriteLogger};
 use std::cell::LazyCell;
+use std::collections::HashMap;
 use std::env::args;
 use std::fs::{create_dir, File};
 use std::path::PathBuf;
@@ -22,9 +25,8 @@ use std::process::exit;
 use std::str::FromStr;
 use std::sync::atomic::AtomicI32;
 use std::sync::Arc;
+use walkdir::WalkDir;
 
-use crate::install_mod::install_mod_logic::iotoc::convert_directory_to_iostore;
-use crate::install_mod::map_to_mods_internal;
 #[cfg(target_os = "windows")]
 use {rfd::MessageButtons, std::panic::PanicHookInfo};
 
@@ -52,7 +54,7 @@ fn is_console() -> bool {
 #[cfg(target_os = "windows")]
 #[link(name = "Kernel32")]
 extern "system" {
-    fn GetConsoleProcessList(processList: *mut u32, count: u32) -> u32;
+    fn GetConsoleProcessList(process_list: *mut u32, count: u32) -> u32;
     fn FreeConsole() -> i32;
 }
 
@@ -123,6 +125,99 @@ fn main() {
             }
             exit(0);
         }
+        if args[1] == "--extract-dir" {
+            let search_dir = &args[2];
+
+            let mut success_log: HashMap<PathBuf, PathBuf> = HashMap::new();
+            let mut failure_log: Vec<(PathBuf, String)> = Vec::new();
+
+            println!("Searching for .utoc files in: {}", search_dir);
+
+            for entry in WalkDir::new(search_dir)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("utoc"))
+            {
+                let path = entry.path().to_path_buf();
+                let file_stem = match path.file_stem().and_then(|s| s.to_str()) {
+                    Some(v) => v,
+                    None => {
+                        failure_log.push((path.clone(), "Invalid file stem".into()));
+                        continue;
+                    }
+                };
+
+                let parent_dir = match path.parent() {
+                    Some(p) => p,
+                    None => {
+                        failure_log.push((path.clone(), "No parent directory".into()));
+                        continue;
+                    }
+                };
+
+                let result_path = parent_dir.join(format!("unpacked_{}", file_stem));
+
+                println!("\nProcessing: {:?}", path);
+                println!("Using directory: {:?}", result_path);
+
+                // Ensure directory exists (do not fail if it already does)
+                if let Err(e) = std::fs::create_dir_all(&result_path) {
+                    failure_log.push((path.clone(), format!("Directory create failed: {}", e)));
+                    continue;
+                }
+
+                let action = ActionUnpack {
+                    utoc: path.clone(),
+                    output: result_path.clone(),
+                    verbose: true,
+                };
+
+                let mut config = retoc::Config {
+                    container_header_version_override: None,
+                    ..Default::default()
+                };
+
+                let aes_toc = match retoc::AesKey::from_str(
+                    "0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74",
+                ) {
+                    Ok(k) => k,
+                    Err(e) => {
+                        failure_log.push((path.clone(), format!("Invalid AES key: {}", e)));
+                        continue;
+                    }
+                };
+
+                config.aes_keys.insert(FGuid::default(), aes_toc);
+                let config = Arc::new(config);
+
+                match action_unpack(action, config) {
+                    Ok(_) => {
+                        success_log.insert(path.clone(), result_path.clone());
+                        println!("Extracted successfully");
+                    }
+                    Err(e) => {
+                        failure_log.push((path.clone(), format!("Extraction failed: {}", e)));
+                    }
+                }
+            }
+
+            println!("\n{}", "=".repeat(64));
+            println!("EXTRACTION SUMMARY");
+            println!("{}", "=".repeat(64));
+
+            println!("Successful extractions: {}", success_log.len());
+            for (src, dst) in &success_log {
+                println!("✓ {:?} → {:?}", src, dst);
+            }
+
+            println!("\nFailed extractions: {}", failure_log.len());
+            for (path, reason) in &failure_log {
+                println!("✗ {:?} — {}", path, reason);
+            }
+
+            exit(0);
+        }
+
         if args[1] == "--pack" {
             let paths = args[2..]
                 .iter()
