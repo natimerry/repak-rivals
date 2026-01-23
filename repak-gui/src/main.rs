@@ -28,6 +28,7 @@ use std::sync::Arc;
 use walkdir::WalkDir;
 
 #[cfg(target_os = "windows")]
+#[cfg(not(debug_assertions))]
 use {rfd::MessageButtons, std::panic::PanicHookInfo};
 
 const ICON: LazyCell<Arc<IconData>> = LazyCell::new(|| {
