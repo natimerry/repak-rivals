@@ -22,7 +22,8 @@ pub fn mesh_patch(paths: &mut Vec<PathBuf>, mod_dir: &PathBuf) -> Result<(), rep
         .iter()
         .filter(|p| {
             p.extension().and_then(|ext| ext.to_str()) == Some("uasset")
-                && (p.to_str().unwrap().to_lowercase().contains("meshes"))
+                && ((p.to_str().unwrap().to_lowercase().starts_with("mesh"))
+                    || (p.to_str().unwrap().to_lowercase().contains("meshes"))) // idk i didnt test this so im keeping this redundant check
         })
         .cloned()
         .collect::<Vec<PathBuf>>();
