@@ -1,10 +1,12 @@
 use colored::Colorize;
 use log::info;
 use path_slash::PathExt;
+use std::collections::HashSet;
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, ErrorKind, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 use uasset_mesh_patch_rivals::Logger;
 use uasset_mesh_patch_rivals::PatchFixer;
 
@@ -17,16 +19,63 @@ impl Logger for PrintLogger {
     }
 }
 
+static DEFAULT_MESH_DIRS: &[&str] = &["Meshes", "Meshs"];
+
+static MESH_DIRECTORY_NAMES: LazyLock<Vec<String>> = LazyLock::new(|| {
+    let path = Path::new("mesh_dir_list.txt");
+
+    let mut set: HashSet<String> = HashSet::new();
+
+    if path.exists() {
+        if let Ok(contents) = fs::read_to_string(path) {
+            for line in contents.lines() {
+                let s = line.trim();
+                if !s.is_empty() {
+                    set.insert(s.to_string());
+                }
+            }
+        }
+    }
+
+    for &d in DEFAULT_MESH_DIRS {
+        set.insert(d.to_string());
+    }
+
+    let should_write = !path.exists() || DEFAULT_MESH_DIRS.iter().any(|d| !set.contains(*d));
+
+    if should_write {
+        let mut file = fs::File::create(path).expect("failed to create meshlist.txt");
+
+        let mut entries: Vec<_> = set.iter().collect();
+        entries.sort();
+
+        for entry in entries {
+            writeln!(file, "{entry}").unwrap();
+        }
+    }
+
+    let mut vec: Vec<String> = set.into_iter().collect();
+    vec.sort();
+    vec
+});
+
 pub fn mesh_patch(paths: &mut Vec<PathBuf>, mod_dir: &PathBuf) -> Result<(), repak::Error> {
     let uasset_files = paths
         .iter()
         .filter(|p| {
-            p.extension().and_then(|ext| ext.to_str()) == Some("uasset")
-                && ((p.to_str().unwrap().to_lowercase().starts_with("mesh"))
-                    || (p.to_str().unwrap().to_lowercase().contains("meshes"))) // idk i didnt test this so im keeping this redundant check
+            p.extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("uasset"))
+                && p.components().any(|c| {
+                    let comp = c.as_os_str().to_string_lossy().to_lowercase();
+                    MESH_DIRECTORY_NAMES
+                        .iter()
+                        .any(|d| comp == *d.to_lowercase())
+                })
         })
         .cloned()
         .collect::<Vec<PathBuf>>();
+    info!("Found {:#?} uasset files to path", &uasset_files);
 
     let patched_cache_file = mod_dir.join("patched_files");
     info!("Patching files...");

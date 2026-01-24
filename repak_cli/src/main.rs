@@ -1,17 +1,17 @@
-
 use clap::builder::TypedValueParser;
 use clap::{Parser, Subcommand};
+use colored::Colorize;
 use path_clean::PathClean;
 use path_slash::PathExt;
 use rayon::prelude::*;
-use uasset_mesh_patch_rivals::{Logger, PatchFixer};
-use std::collections::BTreeMap;
+use repak::utils::AesKey;
+use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, BufWriter, ErrorKind, Write};
 use std::path::{Path, PathBuf};
-use colored::Colorize;
+use std::sync::LazyLock;
 use strum::VariantNames;
-use repak::utils::AesKey;
+use uasset_mesh_patch_rivals::{Logger, PatchFixer};
 
 #[derive(Parser, Debug)]
 struct ActionInfo {
@@ -159,7 +159,11 @@ enum Action {
 #[command(author, version)]
 struct Args {
     /// 256 bit AES encryption key as base64 or hex string if the pak is encrypted
-    #[arg(short, long,default_value="0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74")]
+    #[arg(
+        short,
+        long,
+        default_value = "0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74"
+    )]
     aes_key: Option<AesKey>,
 
     #[command(subcommand)]
@@ -437,6 +441,46 @@ fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repa
     Ok(())
 }
 
+static DEFAULT_MESH_DIRS: &[&str] = &["Meshes", "Meshs"];
+
+static MESH_DIRECTORY_NAMES: LazyLock<Vec<String>> = LazyLock::new(|| {
+    let path = Path::new("mesh_dir_list.txt");
+
+    let mut set: HashSet<String> = HashSet::new();
+
+    if path.exists() {
+        if let Ok(contents) = fs::read_to_string(path) {
+            for line in contents.lines() {
+                let s = line.trim();
+                if !s.is_empty() {
+                    set.insert(s.to_string());
+                }
+            }
+        }
+    }
+
+    for &d in DEFAULT_MESH_DIRS {
+        set.insert(d.to_string());
+    }
+
+    let should_write = !path.exists() || DEFAULT_MESH_DIRS.iter().any(|d| !set.contains(*d));
+
+    if should_write {
+        let mut file = fs::File::create(path).expect("failed to create meshlist.txt");
+
+        let mut entries: Vec<_> = set.iter().collect();
+        entries.sort();
+
+        for entry in entries {
+            writeln!(file, "{entry}").unwrap();
+        }
+    }
+
+    let mut vec: Vec<String> = set.into_iter().collect();
+    vec.sort();
+    vec
+});
+
 fn pack(aes_key: Option<aes::Aes256>, args: ActionPack) -> Result<(), repak::Error> {
     let output = args.output.map(PathBuf::from).unwrap_or_else(|| {
         // NOTE: don't use `with_extension` here because it will replace e.g. the `.1` in
@@ -468,11 +512,19 @@ fn pack(aes_key: Option<aes::Aes256>, args: ActionPack) -> Result<(), repak::Err
     let uasset_files = paths
         .iter()
         .filter(|p| {
-            p.extension().and_then(|ext| ext.to_str()) == Some("uasset")
-                && (p.to_str().unwrap().to_lowercase().contains("meshes"))
+            p.extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("uasset"))
+                && p.components().any(|c| {
+                    let comp = c.as_os_str().to_string_lossy().to_lowercase();
+                    MESH_DIRECTORY_NAMES
+                        .iter()
+                        .any(|d| comp == *d.to_lowercase())
+                })
         })
-        .map(|p| p.clone())
+        .cloned()
         .collect::<Vec<PathBuf>>();
+    println!("Found {:#?} uasset files to path", &uasset_files);
 
     let patched_cache_file = input_path.join("patched_files");
     let file = OpenOptions::new()
@@ -524,15 +576,15 @@ fn pack(aes_key: Option<aes::Aes256>, args: ActionPack) -> Result<(), repak::Err
         }
     }
     struct PrintLogger;
-    impl Logger for PrintLogger{
-        fn log<S: Into<String>>(&self,buf: S) {
+    impl Logger for PrintLogger {
+        fn log<S: Into<String>>(&self, buf: S) {
             let s = Into::<String>::into(buf);
             println!("{}", s);
         }
     }
 
     let print_logger = PrintLogger;
-    let mut fixer = PatchFixer{
+    let mut fixer = PatchFixer {
         logger: print_logger,
     };
 
@@ -570,7 +622,10 @@ fn pack(aes_key: Option<aes::Aes256>, args: ActionPack) -> Result<(), repak::Err
 
             for i in &patched_files {
                 if i.as_str() == rel_uexp.to_string() || i.as_str() == rel_uasset.to_string() {
-                    println!("Skipping {} (File has already been patched before)", i.yellow());
+                    println!(
+                        "Skipping {} (File has already been patched before)",
+                        i.yellow()
+                    );
                     continue 'outer;
                 }
             }
@@ -601,17 +656,16 @@ fn pack(aes_key: Option<aes::Aes256>, args: ActionPack) -> Result<(), repak::Err
 
             drop(rdr);
 
-
             let mut r = BufReader::new(File::open(&backup_file)?);
             let mut o = BufWriter::new(File::create(&tmpfile)?);
 
-            let exp_rd = fixer.read_uexp(&mut r,  backup_file_size,&*backup_file, &mut o, &offsets);
+            let exp_rd = fixer.read_uexp(&mut r, backup_file_size, &*backup_file, &mut o, &offsets);
             match exp_rd {
                 Ok(_) => {}
                 Err(e) => match e.kind() {
                     ErrorKind::InvalidData => {
                         panic!("{}", e.to_string())
-                    },
+                    }
                     ErrorKind::Other => {
                         fs::remove_file(&tmpfile)?;
                         continue 'outer;
