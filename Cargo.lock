@@ -3333,7 +3333,7 @@ checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
 name = "oodle_loader"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "hex",
  "libloading",
@@ -3928,7 +3928,7 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "repak"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "aes",
  "base64 0.22.1",
@@ -3947,7 +3947,7 @@ dependencies = [
 
 [[package]]
 name = "repak-gui"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "colored",
  "dirs",
@@ -3980,7 +3980,7 @@ dependencies = [
 
 [[package]]
 name = "repak_cli"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "aes",
  "assert_cmd",
@@ -4475,7 +4475,7 @@ checksum = "d66dc143e6b11c1eddc06d5c423cfc97062865baf299914ab64caa38182078fe"
 
 [[package]]
 name = "simd_str_cmp"
-version = "2.7.0"
+version = "2.8.0"
 dependencies = [
  "criterion",
  "once_cell",

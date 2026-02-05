@@ -14,6 +14,7 @@ use crate::main_ui::RepakModManager;
 use eframe::egui::{self, IconData};
 use log::{debug, info, LevelFilter};
 use retoc::{action_unpack, ActionUnpack, FGuid};
+use semver::Version;
 use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode, WriteLogger};
 use std::cell::LazyCell;
 use std::collections::HashMap;
@@ -122,23 +123,26 @@ pub fn fetch_mesh_list_in_bg(
     })
 }
 
-#[derive(Deserialize)]
+#[derive(serde::Deserialize)]
 struct GithubRelease {
     tag_name: String,
 }
 
 pub fn check_repak_rivals_version(current_version: &str) {
-    let client = Client::new();
+    let client = reqwest::blocking::Client::new();
 
-    let release: GithubRelease = client
-        .get("https://api.github.com/repos/natimerry/repak-rivals/releases/latest")
-        .header("User-Agent", "repak-rivals-version-check")
-        .send()
-        .expect("failed to query GitHub API")
-        .error_for_status()
-        .expect("GitHub API returned error")
-        .json()
-        .expect("failed to parse GitHub response");
+    let release: GithubRelease = serde_json::from_str(
+        &client
+            .get("https://api.github.com/repos/natimerry/repak-rivals/releases/latest")
+            .header("User-Agent", "repak-rivals-version-check")
+            .send()
+            .expect("failed to query GitHub API")
+            .error_for_status()
+            .expect("GitHub API returned error")
+            .text()
+            .expect("failed to parse GitHub response"),
+    )
+    .expect("Failed to get release data");
 
     // Strip leading 'v' if present (common GitHub tagging style)
     let latest = release.tag_name.trim_start_matches('v');
@@ -146,7 +150,7 @@ pub fn check_repak_rivals_version(current_version: &str) {
     let latest_version = Version::parse(latest).expect("invalid latest version format");
     let current_version = Version::parse(current_version).expect("invalid current version format");
 
-    if current_version < latest_version {
+    if current_version <= latest_version {
         panic!(
             "repak-rivals is outdated: current={}, latest={}",
             current_version, latest_version
@@ -155,6 +159,7 @@ pub fn check_repak_rivals_version(current_version: &str) {
 }
 
 fn main() {
+    #[cfg(not(debug_assertions))]
     check_repak_rivals_version(env!("CARGO_PKG_VERSION"));
 
     #[cfg(target_os = "windows")]
