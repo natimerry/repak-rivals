@@ -1,5 +1,5 @@
-use std::option::Option;
 use std::collections::HashMap;
+use std::option::Option;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::{fs, io};
@@ -11,21 +11,27 @@ struct SkinEntry {
     skin_name: String,
     name: String,
 }
-
+// we grab the locally found character_data.json otherwise we let the program use the build time
+// provided one
 static SKIN_ENTRIES: LazyLock<HashMap<u32, SkinEntry>> = LazyLock::new(|| {
+    let json_data = match fs::read_to_string("data/character_data.json") {
+        Ok(s) => s,
+        Err(_) => include_str!("data/character_data.json").to_owned(),
+    };
+
     let skins: Vec<SkinEntry> =
-        serde_json::from_str(include_str!("data/character_data.json")).expect("Invalid JSON");
-    let skin_map: HashMap<u32, SkinEntry> = skins
+        serde_json::from_str(&json_data).expect("Invalid character_data.json");
+
+    skins
         .into_iter()
-        .map(|entry| (entry.skinid.parse().unwrap(), entry))
-        .collect();
-
-    skin_map
+        .map(|entry| {
+            let id: u32 = entry.skinid.parse().expect("Invalid skinid");
+            (id, entry)
+        })
+        .collect()
 });
 
-static SKIN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"[0-9]{4}\/[0-9]{7}").unwrap()
-});
+static SKIN_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[0-9]{4}\/[0-9]{7}").unwrap());
 
 pub fn collect_files(paths: &mut Vec<PathBuf>, dir: &Path) -> io::Result<()> {
     for entry in fs::read_dir(dir)? {
@@ -79,13 +85,11 @@ pub fn get_current_pak_characteristics(mod_contents: Vec<String>) -> String {
         let category = path.split('/').next().unwrap_or_default();
 
         match category {
-            "Characters" => {
-                match get_character_mod_skin(path) {
-                    Some(ModType::Custom(skin)) => return skin,
-                    Some(ModType::Default(name)) => fallback = Some(name),
-                    None => return "Character (Unknown)".to_string(),
-                }
-            }
+            "Characters" => match get_character_mod_skin(path) {
+                Some(ModType::Custom(skin)) => return skin,
+                Some(ModType::Default(name)) => fallback = Some(name),
+                None => return "Character (Unknown)".to_string(),
+            },
             "UI" => return "UI".to_string(),
             "Movies" => return "Movies".to_string(),
             _ if path.contains("WwiseAudio") => return "Audio".to_string(),
@@ -96,10 +100,9 @@ pub fn get_current_pak_characteristics(mod_contents: Vec<String>) -> String {
     fallback.unwrap_or_else(|| "Unknown".to_string())
 }
 
-
 use log::info;
-use serde::{Deserialize, Serialize};
 use regex_lite::Regex;
+use serde::{Deserialize, Serialize};
 
 pub fn find_marvel_rivals() -> Option<PathBuf> {
     let shit = get_steam_library_paths();

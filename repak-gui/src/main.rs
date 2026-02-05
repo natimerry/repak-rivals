@@ -19,12 +19,13 @@ use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode, W
 use std::cell::LazyCell;
 use std::collections::HashMap;
 use std::env::args;
-use std::fs::{create_dir, File};
+use std::fs::{self, create_dir, File};
 use std::path::PathBuf;
 use std::process::exit;
 use std::str::FromStr;
 use std::sync::atomic::AtomicI32;
 use std::sync::Arc;
+use std::thread;
 use walkdir::WalkDir;
 
 #[cfg(target_os = "windows")]
@@ -74,6 +75,25 @@ fn custom_panic(_info: &PanicHookInfo) -> ! {
         .set_description(msg)
         .show();
     std::process::exit(1);
+}
+
+pub fn fetch_skins_in_background(
+) -> thread::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>> {
+    thread::spawn(|| {
+        let client = reqwest::blocking::Client::new();
+
+        let response = client
+            .get("https://rivals.natimerry.com/skins")
+            .send()?
+            .error_for_status()?;
+
+        let body = response.text()?;
+
+        fs::create_dir_all("data")?;
+        fs::write("data/character_data.json", body)?;
+
+        Ok(())
+    })
 }
 
 fn main() {
