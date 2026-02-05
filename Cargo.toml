@@ -6,7 +6,7 @@ members = ["repak", "repak-gui", "repak_cli","simd_str_cmp"]
 repository = "https://github.com/natimerry/repak-rivals"
 authors = ["spuds", "trumank","natimerry"]
 license = "MIT OR Apache-2.0"
-version = "2.6.1"
+version = "2.7.0"
 edition = "2021"
 keywords = ["marvel-rivals","unreal-engine", "pak", "unrealpak"]
 
@@ -27,4 +27,3 @@ hex = "0.4"
 [profile.dist]
 inherits = "release"
 lto = "thin"
-
