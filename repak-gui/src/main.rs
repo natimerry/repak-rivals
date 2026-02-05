@@ -122,7 +122,41 @@ pub fn fetch_mesh_list_in_bg(
     })
 }
 
+#[derive(Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+}
+
+pub fn check_repak_rivals_version(current_version: &str) {
+    let client = Client::new();
+
+    let release: GithubRelease = client
+        .get("https://api.github.com/repos/natimerry/repak-rivals/releases/latest")
+        .header("User-Agent", "repak-rivals-version-check")
+        .send()
+        .expect("failed to query GitHub API")
+        .error_for_status()
+        .expect("GitHub API returned error")
+        .json()
+        .expect("failed to parse GitHub response");
+
+    // Strip leading 'v' if present (common GitHub tagging style)
+    let latest = release.tag_name.trim_start_matches('v');
+
+    let latest_version = Version::parse(latest).expect("invalid latest version format");
+    let current_version = Version::parse(current_version).expect("invalid current version format");
+
+    if current_version < latest_version {
+        panic!(
+            "repak-rivals is outdated: current={}, latest={}",
+            current_version, latest_version
+        );
+    }
+}
+
 fn main() {
+    check_repak_rivals_version(env!("CARGO_PKG_VERSION"));
+
     #[cfg(target_os = "windows")]
     if !is_console() {
         free_console();
