@@ -34,7 +34,7 @@ uasset-mesh-patch-rivals = {path = "../uasset-mesh-patch-rivals"}
 colored = "3.0.0"
 notify = "8.0.0"
 simplelog = "0.12.2"
-regex-lite = "0.1.5"
+regex-lite = "0.1.9"
 retoc = {path = "../retoc-rivals"}
 unrar = "0.5.8"
 zip = "2.6.1"
