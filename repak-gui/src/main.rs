@@ -13,7 +13,7 @@ use crate::install_mod::install_mod_logic::iotoc::convert_directory_to_iostore;
 use crate::install_mod::map_to_mods_internal;
 use crate::main_ui::RepakModManager;
 use eframe::egui::{self, IconData};
-use log::LevelFilter;
+use log::{debug, info, LevelFilter};
 use retoc::{action_unpack, ActionUnpack, FGuid};
 use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode, WriteLogger};
 use std::cell::LazyCell;
@@ -77,6 +77,7 @@ fn custom_panic(_info: &PanicHookInfo) -> ! {
     std::process::exit(1);
 }
 
+#[cfg(not(debug_assertions))]
 pub fn fetch_skins_in_background(
 ) -> thread::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>> {
     thread::spawn(|| {
@@ -88,6 +89,7 @@ pub fn fetch_skins_in_background(
             .error_for_status()?;
 
         let body = response.text()?;
+        debug!("Received response: {:?}", body);
 
         fs::create_dir_all("data")?;
         fs::write("data/character_data.json", body)?;
@@ -295,6 +297,12 @@ fn main() {
             .with_icon(ICON.clone()),
         ..Default::default()
     };
+
+    info!("Fetching updated skin data");
+
+    // spawn a background thread to get skins
+    #[cfg(not(debug_assertions))]
+    fetch_skins_in_background();
 
     eframe::run_native(
         "Repak GUI",
