@@ -150,7 +150,7 @@ pub fn check_repak_rivals_version(current_version: &str) {
     let latest_version = Version::parse(latest).expect("invalid latest version format");
     let current_version = Version::parse(current_version).expect("invalid current version format");
 
-    if current_version <= latest_version {
+    if current_version < latest_version {
         panic!(
             "repak-rivals is outdated: current={}, latest={}",
             current_version, latest_version
@@ -159,9 +159,6 @@ pub fn check_repak_rivals_version(current_version: &str) {
 }
 
 fn main() {
-    #[cfg(not(debug_assertions))]
-    check_repak_rivals_version(env!("CARGO_PKG_VERSION"));
-
     #[cfg(target_os = "windows")]
     if !is_console() {
         free_console();
@@ -171,6 +168,8 @@ fn main() {
     std::panic::set_hook(Box::new(move |info| {
         custom_panic(info.into());
     }));
+    #[cfg(not(debug_assertions))]
+    check_repak_rivals_version(env!("CARGO_PKG_VERSION"));
 
     /*
         Custom baked CLI utility for tobi, if the program detects a specific argument passed to it, it does not spaw GUI
