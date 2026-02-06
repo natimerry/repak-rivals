@@ -18,7 +18,7 @@ eula = false
 eframe = "0.31.1"
 egui_flex = "0.3.0"
 rfd = "0.15.2"
-log = "0.4.26"
+log = "0.4.29"
 repak = { path = "../repak" ,features = ["oodle","encryption"]}
 hex.workspace = true
 egui_extras = { version = "0.31.0", features = ["all_loaders"] }
