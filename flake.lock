@@ -86,12 +86,31 @@
         "type": "github"
       }
     },
+    "retoc-rivals": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1760590922,
+        "narHash": "sha256-pYzuu4pxRPXYerHblB1ZjFrv5KAlkIMwKTzy7rX39s0=",
+        "owner": "natimerry",
+        "repo": "retoc-rivals",
+        "rev": "c5b00c2b7b77ab5ac1fbf537bee02145e8a642e0",
+        "type": "github"
+      },
+      "original": {
+        "owner": "natimerry",
+        "ref": "c5b00c2",
+        "repo": "retoc-rivals",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "crane": "crane",
         "fenix": "fenix",
         "flakelight": "flakelight",
-        "nixpkgs": "nixpkgs_2"
+        "nixpkgs": "nixpkgs_2",
+        "retoc-rivals": "retoc-rivals",
+        "uasset-mesh-patch-rivals": "uasset-mesh-patch-rivals"
       }
     },
     "rust-analyzer-src": {
@@ -108,6 +127,23 @@
         "owner": "rust-lang",
         "ref": "nightly",
         "repo": "rust-analyzer",
+        "type": "github"
+      }
+    },
+    "uasset-mesh-patch-rivals": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1740339544,
+        "narHash": "sha256-mwH1zmInTMDsGzpUWVx5Gxg9BqsiFLs6iVchsC+ClU4=",
+        "owner": "natimerry",
+        "repo": "uasset-mesh-patch-rivals",
+        "rev": "a9e9f339e0039f76e498455b1519375b336c6a32",
+        "type": "github"
+      },
+      "original": {
+        "owner": "natimerry",
+        "ref": "a9e9f33",
+        "repo": "uasset-mesh-patch-rivals",
         "type": "github"
       }
     }
