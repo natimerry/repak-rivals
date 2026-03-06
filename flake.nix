@@ -46,13 +46,13 @@
             ]
         );
         src = pkgs.runCommand "source-with-submodules" {} ''
-
-          cp -r ${self} $out
+          mkdir -p $out
+          cp -r ${self}/. $out/
           chmod -R u+w $out
-          cp -r ${retoc-rivals} $out/retoc-rivals
-          cp -r ${uasset-mesh-patch-rivals} $out/uasset-mesh-patch-rivals
-          chmod -R u+w $out/retoc-rivals $out/uasset-mesh-patch-rivals
-
+          mkdir -p $out/retoc-rivals
+          mkdir -p $out/uasset-mesh-patch-rivals
+          cp -r ${retoc-rivals}/. $out/retoc-rivals/
+          cp -r ${uasset-mesh-patch-rivals}/. $out/uasset-mesh-patch-rivals/
         '';
         cargoArtifacts = craneLib.buildDepsOnly {
           inherit src;
