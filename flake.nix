@@ -38,7 +38,7 @@
           pname = "repak-rivals"; # i added this so crane wont spam my fucking terminal
           doCheck = false; # disable tests
           src = builtins.fetchGit {
-            url = "./.";
+            url = ./.;
             submodules = true;
           };
           nativeBuildInputs = with pkgs; [
