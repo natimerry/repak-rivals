@@ -44,14 +44,12 @@
             makeWrapper
           ];
 
-          env = {
-            LD_LIBRARY_PATH = "${pkgs.stdenv.cc.cc.lib}/lib"; # unsure if needed or not
-          };
+          buildInputs = [pkgs.stdenv.cc.cc.lib];
 
           # banger postInstall right here
           postInstall = ''
             wrapProgram $out/bin/repak-gui \
-              --prefix LD_LIBRARY_PATH : ${pkgs.stdenv.cc.cc.lib}/lib:${pkgs.libX11}/lib:${pkgs.libXcursor}/lib:${pkgs.libxi}/lib:${pkgs.libxkbcommon}/lib:${pkgs.mesa}/lib:${pkgs.libGL}/lib
+              --prefix LD_LIBRARY_PATH : ${with pkgs; lib.makeLibraryPath [stdenv.cc.cc.lib libX11 libXcursor libXcursor libxi libxkbcommon mesa libGL]}
           '';
         };
       apps.default = packages: {
