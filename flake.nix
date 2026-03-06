@@ -1,6 +1,5 @@
 {
   inputs = {
-    self.submodules = true;
     flakelight.url = "github:nix-community/flakelight";
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     crane.url = "github:ipetkov/crane";
@@ -38,7 +37,10 @@
         craneLib.buildPackage {
           pname = "repak-rivals"; # i added this so crane wont spam my fucking terminal
           doCheck = false; # disable tests
-          src = ./.;
+          src = builtins.fetchGit {
+            url = "./.";
+            submodules = true;
+          };
           nativeBuildInputs = with pkgs; [
             stdenv.cc.cc.lib
             makeWrapper
