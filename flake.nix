@@ -45,6 +45,7 @@
               "rustfmt"
             ]
         );
+        # instead of making $out become $self, i just make a folder and then put the $self content into $out, seems to fix it... idk how
         src = pkgs.runCommand "source-with-submodules" {} ''
           mkdir -p $out
           cp -r ${self}/. $out/
@@ -54,6 +55,7 @@
           cp -r ${retoc-rivals}/. $out/retoc-rivals/
           cp -r ${uasset-mesh-patch-rivals}/. $out/uasset-mesh-patch-rivals/
         '';
+        # i am tired to build dependencies so i added this
         cargoArtifacts = craneLib.buildDepsOnly {
           inherit src;
           pname = "repak-rivals";
