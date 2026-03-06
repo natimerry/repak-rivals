@@ -19,27 +19,24 @@
     };
   };
 
-  outputs =
-    {
-      flakelight,
-      crane,
-      fenix,
-      self,
-      uasset-mesh-patch-rivals,
-      retoc-rivals,
-      ...
-    }:
+  outputs = {
+    flakelight,
+    crane,
+    fenix,
+    self,
+    uasset-mesh-patch-rivals,
+    retoc-rivals,
+    ...
+  }:
     flakelight ./. {
       # make you able to access pkgs.fenix.complete.xyz
       withOverlays = [
         fenix.overlays.default
       ];
 
-      packages.default =
-        { pkgs, ... }:
-        let
-          craneLib = (crane.mkLib pkgs).overrideToolchain (
-            p:
+      packages.default = {pkgs, ...}: let
+        craneLib = (crane.mkLib pkgs).overrideToolchain (
+          p:
             p.fenix.complete.withComponents [
               "cargo"
               "clippy"
@@ -47,34 +44,39 @@
               "rustc"
               "rustfmt"
             ]
-          );
-          src = pkgs.runCommand "source-with-submodules" { } ''
+        );
+        src = pkgs.runCommand "source-with-submodules" {} ''
 
-            cp -r ${self} $out
-            chmod -R u+w $out
-            cp -r ${retoc-rivals} $out/retoc-rivals
-            cp -r ${uasset-mesh-patch-rivals} $out/uasset-mesh-patch-rivals
-            chmod -R u+w $out/retoc-rivals $out/uasset-mesh-patch-rivals
+          cp -r ${self} $out
+          chmod -R u+w $out
+          cp -r ${retoc-rivals} $out/retoc-rivals
+          cp -r ${uasset-mesh-patch-rivals} $out/uasset-mesh-patch-rivals
+          chmod -R u+w $out/retoc-rivals $out/uasset-mesh-patch-rivals
 
-          '';
-        in
+        '';
+        cargoArtifacts = craneLib.buildDepsOnly {
+          inherit src;
+          pname = "repak-rivals";
+          doCheck = false;
+        };
+      in
         craneLib.buildPackage {
           pname = "repak-rivals"; # i added this so crane wont spam my fucking terminal
           doCheck = false; # disable tests
 
-          inherit src;
+          inherit src cargoArtifacts;
           nativeBuildInputs = with pkgs; [
             stdenv.cc.cc.lib
             makeWrapper
           ];
 
-          buildInputs = [ pkgs.stdenv.cc.cc.lib ];
+          buildInputs = [pkgs.stdenv.cc.cc.lib];
 
           # banger postInstall right here
           postInstall = ''
             wrapProgram $out/bin/repak-gui \
               --prefix LD_LIBRARY_PATH : ${
-                with pkgs;
+              with pkgs;
                 lib.makeLibraryPath [
                   stdenv.cc.cc.lib
                   libX11
@@ -85,24 +87,22 @@
                   mesa
                   libGL
                 ]
-              }
+            }
           '';
         };
       apps.default = packages: {
         type = "app";
         program = "${packages.default}/bin/repak-gui";
       };
-      devShell.packages =
-        { pkgs, ... }:
-        [
-          (pkgs.fenix.complete.withComponents [
-            "cargo"
-            "clippy"
-            "rust-src"
-            "rustc"
-            "rustfmt"
-            "rust-analyzer"
-          ])
-        ];
+      devShell.packages = {pkgs, ...}: [
+        (pkgs.fenix.complete.withComponents [
+          "cargo"
+          "clippy"
+          "rust-src"
+          "rustc"
+          "rustfmt"
+          "rust-analyzer"
+        ])
+      ];
     };
 }
