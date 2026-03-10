@@ -131,20 +131,28 @@ struct GithubRelease {
 pub fn check_repak_rivals_version(current_version: &str) {
     let client = reqwest::blocking::Client::new();
 
-    let release: GithubRelease = serde_json::from_str(
-        &client
-            .get("https://api.github.com/repos/natimerry/repak-rivals/releases/latest")
-            .header("User-Agent", "repak-rivals-version-check")
-            .send()
-            .expect("failed to query GitHub API")
-            .error_for_status()
-            .expect("GitHub API returned error")
-            .text()
-            .expect("failed to parse GitHub response"),
-    )
-    .expect("Failed to get release data");
+    let req = client
+        .get("https://api.github.com/repos/natimerry/repak-rivals/releases/latest")
+        .header("User-Agent", "repak-rivals-version-check")
+        .send();
 
-    // Strip leading 'v' if present (common GitHub tagging style)
+    if let Err(e) = req {
+        rfd::MessageDialog::new()
+            .set_title("Failed to query for the latest version")
+            .set_buttons(rfd::MessageButtons::Ok)
+            .set_description(format!(
+                "Repak has failed to query the GitHub API to check for the latest version: {e}"
+            ))
+            .show();
+        return;
+    }
+
+    let req = req.unwrap();
+
+    let release: GithubRelease =
+        serde_json::from_str(&req.text().expect("failed to parse GitHub response"))
+            .expect("Failed to get release data");
+
     let latest = release.tag_name.trim_start_matches('v');
 
     let latest_version = Version::parse(latest).expect("invalid latest version format");

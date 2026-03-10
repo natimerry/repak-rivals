@@ -1,0 +1,27 @@
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+jobs:
+  update_nexus_file:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: greatness7/nexusmods_file_updater@v2
+        with:
+          username: ${{secrets.NEXUS_USERNAME}}
+          password: ${{secrets.NEXUS_PASSWORD}}
+          game_domain_name: "marvelrivals"
+          mod_id: "1717"
+          file_name: "repak-gui"
+          file_version: ${{github.ref_name}}
+          update_version: true
+          file_category: "Main Files"
+          new_existing_version: true
+          original_file: "Mod Name .*"
+          remove_old_version: true
+          file_description: "Changelog: https://github.com/username/repository/releases"
+          remove_nmm_button: false
+          set_as_main_nmm: true
+          requirements_pop_up: true
+          file_path: "./Mod Name-latest.7z"
