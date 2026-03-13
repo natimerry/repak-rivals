@@ -24,15 +24,13 @@ pub fn extract_zip(zip_path: &str, output_dir: &str) -> io::Result<()> {
 
 use std::fs::File;
 use std::io;
-use unrar::Archive;
 use std::path::Path;
+use unrar::Archive;
 use zip::ZipArchive;
 
 pub fn extract_rar(rar_path: &str, output_dir: &str) -> Result<(), unrar::error::UnrarError> {
     let output_dir = Path::new(output_dir);
-    let mut archive =
-        Archive::new(rar_path)
-            .open_for_processing()?;
+    let mut archive = Archive::new(rar_path).open_for_processing()?;
     while let Some(header) = archive.read_header()? {
         let filename = header.entry().filename.clone();
         archive = if header.entry().is_file() {
@@ -45,13 +43,15 @@ pub fn extract_rar(rar_path: &str, output_dir: &str) -> Result<(), unrar::error:
 }
 
 pub fn _rar_length(rar_path: &str) -> Result<usize, unrar::error::UnrarError> {
-    let archive =
-        Archive::new(rar_path)
-            .open_for_listing()?;
-    let len = archive.into_iter().filter(|e| e.is_ok()).map(|e|e.unwrap()).collect::<Vec<_>>().len();
+    let archive = Archive::new(rar_path).open_for_listing()?;
+    let len = archive
+        .into_iter()
+        .filter(|e| e.is_ok())
+        .map(|e| e.unwrap())
+        .collect::<Vec<_>>()
+        .len();
     Ok(len)
 }
-
 
 pub fn _zip_length(zip_path: &str) -> Result<usize, io::Error> {
     let file = File::open(zip_path)?;
