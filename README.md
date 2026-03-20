@@ -1,30 +1,74 @@
 # repak-rivals
 
-Library and CLI tool for working with Unreal Engine .pak files. Modified to work with netease pak files and patch uasset meshes for marvel rivals
+`repak-rivals` is a mod installer and packaging toolset for Marvel Rivals.
 
- - Supports reading and writing a wide range of versions
- - Easy to use API while providing low level control:
-   - Only parses index initially and reads file data upon request
-   - Can rewrite index in place to perform append or delete operations without rewriting entire pak
+Use `repak-gui` by default. It is the supported end-user workflow for modern Marvel Rivals mods.
 
-## Mod patching instructions
-1) First, grab repak for your platform under Download repak_cli 0.X.X and extract it somewhere for easy access. Currently, Windows and Linux are supported.
-2) Move the mod .pak file inside the repak folder, now drag the mod .pak into repakMod.bat and you'll get a .pak file that's now fixed. Take it and drop it in your Paks folder. (or ~mods folder inside your Paks folder for the sake of organization)
-Make sure that _9999999 precedes the _P suffix. So "zDopeAssMod_P" would become "zDopeAssMod_9999999_P".
+`repak_cli` is mainly useful for inspection, extraction, and pak-only workflows. It does not generate `.utoc` / `.ucas`, is not the preferred path for current Marvel Rivals modding, and should only be used if you already understand the packaging constraints.
 
-3) This is required in order for the game to prioritize mod files and replace the assets properly.
+## Install
 
-The fix for custom models is applied on repacking, so no further tweaking is needed. Enjoy!
+1. Download the latest release from Nexus Mods: https://www.nexusmods.com/marvelrivals/mods/1717
+2. Launch `repak-gui`.
+3. Confirm the Marvel Rivals mod folder.
+4. Drag mods, archives, or mod folders into the window, or use `File -> Install mods` / `File -> Pack folder`.
+5. Install the generated mod output into the detected `~mods` path.
 
-As for modders:
-`repakMod.bat` can also be used to pack folders into `.pak` files! There's also a `.bat` script for unpacking `.pak` files into folders too if you need it.
+## Features
 
+- GUI-first workflow for Marvel Rivals mod installation
+- drag-and-drop support for `.pak`, `.zip`, `.rar`, and mod folders
+- automatic detection of the Marvel Rivals mod directory
+- IOStore generation for modern mods
+- pak repacking for audio and movie patches
+- mesh-fix support for custom model mods
+- installed mod browser with enable/disable and delete actions
+- pak content viewer with extract, copy path, copy offset, and hash actions
+- mod type detection for character, UI, audio, and movie mods
+- batch install flow with per-mod options
+- Windows and Linux release builds
 
-*If you like my support on this game consider [buying me a coffee](https://ko-fi.com/natimerry)*
+## Latest Changelog
 
+### v2.8.2 - 2026-03-11
 
-## acknowledgements
-- [unpak](https://github.com/bananaturtlesandwich/unpak): original crate featuring read-only pak operations
-- [rust-u4pak](https://github.com/panzi/rust-u4pak)'s README detailing the pak file layout
-- [jieyouxu](https://github.com/jieyouxu) for serialization implementation of the significantly more complex V11 index
-- [repak](https://github.com/trumank/repak) for the original repak implementation
+- made internet-dependent behavior optional
+- improved `flake.nix` support
+
+### v2.8.1 - 2026-02-06
+
+- fixed the GUI update check
+
+### v2.8.0 - 2026-02-06
+
+- made update checks mandatory
+- refreshed skin data
+- moved mesh directory fetching into the background
+
+### v2.7.0 - 2026-02-05
+
+- added release-mode fetching for latest skin data
+
+<details>
+<summary>CLI Help</summary>
+
+```console
+$ repak --help
+Usage: repak [OPTIONS] <COMMAND>
+
+Commands:
+  info       Print .pak info
+  list       List .pak files
+  hash-list  List .pak files and the SHA256 of their contents. Useful for finding differences between paks
+  unpack     Unpack .pak file
+  pack       Pack directory into .pak file
+  get        Reads a single file to stdout
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+  -a, --aes-key <AES_KEY>  256 bit AES encryption key as base64 or hex string if the pak is encrypted [default: 0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74]
+  -h, --help               Print help
+  -V, --version            Print version
+```
+
+</details>
