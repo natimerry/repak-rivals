@@ -1,18 +1,18 @@
 # repak-rivals
 
-`repak-rivals` is a mod installer and packaging toolset for Marvel Rivals.
+`repak-rivals` is a Marvel Rivals mod packaging and install toolset.
 
-Use `repak-gui` by default. It is the supported end-user workflow for modern Marvel Rivals mods.
+Use `repak-gui` by default. It is the intended workflow for current Marvel Rivals mods.
 
-`repak_cli` is mainly useful for inspection, extraction, and pak-only workflows. It does not generate `.utoc` / `.ucas`, is not the preferred path for current Marvel Rivals modding, and should only be used if you already understand the packaging constraints.
+`repak_cli` is mainly for pak inspection and pak-only workflows. It does not generate `.utoc` / `.ucas`, is not the preferred option for modern Rivals mods, and should only be used if you already understand the packaging constraints.
 
 ## Install
 
 1. Download the latest release from Nexus Mods: https://www.nexusmods.com/marvelrivals/mods/1717
 2. Launch `repak-gui`.
-3. Confirm the Marvel Rivals mod folder.
-4. Drag mods, archives, or mod folders into the window, or use `File -> Install mods` / `File -> Pack folder`.
-5. Install the generated mod output into the detected `~mods` path.
+3. Confirm the detected Marvel Rivals mod folder.
+4. Drag in mods, archives, or mod folders, or use `File -> Install mods` / `File -> Pack folder`.
+5. Install the generated output into the `~mods` directory.
 
 ## Features
 
@@ -22,10 +22,10 @@ Use `repak-gui` by default. It is the supported end-user workflow for modern Mar
 - IOStore generation for modern mods
 - pak repacking for audio and movie patches
 - mesh-fix support for custom model mods
-- installed mod browser with enable/disable and delete actions
+- batch install flow with per-mod options
+- installed mod browser with enable, disable, and delete actions
 - pak content viewer with extract, copy path, copy offset, and hash actions
 - mod type detection for character, UI, audio, and movie mods
-- batch install flow with per-mod options
 - Windows and Linux release builds
 
 ## Latest Changelog
