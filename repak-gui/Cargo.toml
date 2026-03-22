@@ -32,7 +32,7 @@ path-slash = "0.2.1"
 rayon = "1.10.0"
 uasset-mesh-patch-rivals = {path = "../uasset-mesh-patch-rivals"}
 colored = "3.0.0"
-notify = "8.0.0"
+notify = "8.2.0"
 simplelog = "0.12.2"
 regex-lite = "0.1.5"
 retoc = {path = "../retoc-rivals"}
