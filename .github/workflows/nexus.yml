@@ -66,8 +66,8 @@ jobs:
           gh release download "${{ steps.release.outputs.tag }}" \
             --repo "${{ github.repository }}" \
             --dir incoming \
-            --pattern '*.zip' \
-            --pattern '*.tar.xz'
+            --pattern 'repak-gui-*.zip' \
+            --pattern 'repak-gui-*.tar.xz'
 
       - name: Install dependencies
         run: sudo apt-get install -y libarchive-tools
