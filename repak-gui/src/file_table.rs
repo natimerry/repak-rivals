@@ -9,6 +9,7 @@ use sha2::Digest;
 use std::fs::File;
 use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 pub struct FileTable {
     striped: bool,
@@ -47,7 +48,6 @@ impl Default for FileTable {
     }
 }
 
-
 impl FileTable {
     pub fn new(pak_reader: &PakReader, pak_path: &Path) -> Self {
         // If the utoc exists, use the utoc
@@ -57,11 +57,9 @@ impl FileTable {
 
         let file_entries = {
             if utoc_path.exists() {
-                read_utoc(&utoc_path, pak_reader,pak_path)
-            }
-            else {
-                let entries = pak_reader
-                    .files().to_vec();
+                read_utoc(&utoc_path, pak_reader, pak_path)
+            } else {
+                let entries = pak_reader.files().to_vec();
 
                 entries
                     .iter()
@@ -113,13 +111,11 @@ impl FileTable {
             table = table.sense(egui::Sense::click());
         }
 
-
         table
             .header(20.0, |mut header| {
                 header.col(|ui| {
                     ui.label("Path");
                 });
-
 
                 if self.showing_utoc {
                     header.col(|ui| {
@@ -129,8 +125,7 @@ impl FileTable {
                     header.col(|ui| {
                         ui.label("PackageData Chunks");
                     });
-                }
-                else{
+                } else {
                     header.col(|ui| {
                         ui.label("Offset");
                     });
@@ -160,7 +155,7 @@ impl FileTable {
                         };
                     })
                     .1
-                    .context_menu(|ui| show_ctx_menu(ui, entry,self.showing_utoc));
+                    .context_menu(|ui| show_ctx_menu(ui, entry, self.showing_utoc));
 
                     if self.showing_utoc {
                         row.col(|ui| {
@@ -169,8 +164,7 @@ impl FileTable {
                         row.col(|ui| {
                             ui.label(&entry.package_data.unwrap_or(0).to_string());
                         });
-                    }
-                    else {
+                    } else {
                         row.col(|ui| {
                             ui.label(&entry.offset);
                         });
@@ -193,11 +187,50 @@ impl FileTable {
     }
 }
 fn show_ctx_menu(ui: &mut egui::Ui, entry: &FileEntry, is_utoc: bool) {
-    if is_utoc {
-        ui.label("This is a utoc file, you can't extract files from it.");
-        return;
-    }
     if ui.button("Extract").clicked() {
+        if is_utoc {
+            let name = PathBuf::from(&entry.file_path)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
+            let dialog = FileDialog::new().set_file_name(name).save_file();
+
+            if let Some(path) = dialog {
+                let root = path.file_stem().unwrap().to_str().unwrap();
+                let result_path = path.parent().unwrap().join(root);
+                println!("Creating directory: {:?}", &result_path);
+
+                let _ = std::fs::create_dir(&result_path)
+                    .expect("Failed to create extraction directory");
+
+                let action: retoc::ActionUnpack = retoc::ActionUnpack {
+                    utoc: PathBuf::from(&entry.file_path),
+                    output: result_path,
+                    verbose: true,
+                };
+
+                let mut config = retoc::Config {
+                    container_header_version_override: None,
+                    ..Default::default()
+                };
+
+                let aes_toc = retoc::AesKey::from_str(
+                    "0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74",
+                )
+                .unwrap();
+
+                config
+                    .aes_keys
+                    .insert(retoc::FGuid::default(), aes_toc.clone());
+                let config = std::sync::Arc::new(config);
+
+                retoc::action_unpack(action, config).expect("Failed to extract");
+            }
+            ui.label("This is a utoc file, you can't extract files from it.");
+            ui.close_menu();
+        }
+
         let name = PathBuf::from(&entry.file_path)
             .file_name()
             .unwrap()
@@ -218,13 +251,16 @@ fn show_ctx_menu(ui: &mut egui::Ui, entry: &FileEntry, is_utoc: bool) {
             ui.close_menu();
         }
     }
+
     if ui.button("Copy Path").clicked() {
         ui.output_mut(|o| o.commands = vec![CopyText(entry.file_path.clone())]);
         ui.close_menu();
     }
-    if ui.button("Copy Offset").clicked() {
-        ui.output_mut(|o| o.commands = vec![CopyText(entry.offset.clone().to_string())]);
-        ui.close_menu();
+    if !is_utoc {
+        if ui.button("Copy Offset").clicked() {
+            ui.output_mut(|o| o.commands = vec![CopyText(entry.offset.clone().to_string())]);
+            ui.close_menu();
+        }
     }
 
     let mut hasher = sha2::Sha256::new();

@@ -28,6 +28,28 @@ Use `repak-gui` by default. It is the intended workflow for current Marvel Rival
 - mod type detection for character, UI, audio, and movie mods
 - Windows and Linux release builds
 
+## Nexus Release Automation
+
+The repository includes `.github/workflows/nexus.yml` to publish GitHub release assets to Nexus Mods via the v3 API.
+
+It downloads `.zip` and `.tar.xz` assets from the published GitHub release, converts any `.tar.xz` assets into `.zip`, then uploads each file as a new version in an existing Nexus file update group.
+
+Required GitHub configuration:
+
+- Secret `NEXUSMODS_API_KEY`: your Nexus Mods API key.
+- Variable `NEXUS_FILE_GROUP_MAP_JSON`: JSON object mapping the final Nexus upload filename to a Nexus file update group ID.
+- Variable `NEXUS_FILE_NAME_MAP_JSON`: optional JSON object mapping the final Nexus upload filename to the display name shown on Nexus.
+- Variable `NEXUS_FILE_CATEGORY`: optional Nexus file category, one of `main`, `optional`, or `miscellaneous`. Defaults to `main`.
+
+Example `NEXUS_FILE_GROUP_MAP_JSON`:
+
+```json
+{
+  "repak-gui-x86_64-pc-windows-msvc.zip": "12345",
+  "repak-gui-x86_64-unknown-linux-gnu.zip": "67890"
+}
+```
+
 ## Latest Changelog
 
 ### v2.8.2 - 2026-03-11
