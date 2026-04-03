@@ -1,6 +1,6 @@
-use std:: sync::OnceLock;
 use std::fs::File;
-use std::io:: Write;
+use std::io::Write;
+use std::sync::OnceLock;
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -94,8 +94,6 @@ mod oodle_lz {
         unsafe extern "system" fn(compressor: Compressor, rawSize: usize) -> usize;
 }
 
-
-
 struct OodlePlatform {
     name: &'static str,
     bytes: &'static [u8],
@@ -104,17 +102,14 @@ struct OodlePlatform {
 #[cfg(target_os = "linux")]
 static OODLE_PLATFORM: OodlePlatform = OodlePlatform {
     name: "liboo2corelinux64.so.9",
-    bytes: include_bytes!("../../liboo2corelinux64.so.9")
+    bytes: include_bytes!("../../liboo2corelinux64.so.9"),
 };
-
 
 #[cfg(windows)]
 static OODLE_PLATFORM: OodlePlatform = OodlePlatform {
     name: "oo2core_9_win64.dll",
     bytes: include_bytes!("../../oo2core_9_win64.dll"),
 };
-
-
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -129,7 +124,6 @@ pub enum Error {
     #[error("Oodle libloading error {0:?}")]
     LibLoading(#[from] libloading::Error),
 }
-
 
 fn fetch_oodle() -> Result<std::path::PathBuf> {
     let oodle_path = std::env::current_exe()?.with_file_name(OODLE_PLATFORM.name);
@@ -259,7 +253,7 @@ mod test {
         compression and decompression.";
 
         let buffer = oodle
-            .compress(data, Compressor::Mermaid, CompressionLevel::Optimal5)
+            .compress(data, Compressor::Selkie, CompressionLevel::Optimal5)
             .unwrap();
 
         dbg!((data.len(), buffer.len()));
