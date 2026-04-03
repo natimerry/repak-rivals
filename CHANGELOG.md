@@ -3,6 +3,13 @@
 ## Changes:
 - No changes yet.
 
+# Version 2.11.1 (2026-04-04)
+
+This release improves mod list usability and suffix handling.
+
+## Changes:
+- Updated `character_data.json`
+
 # Version 2.11.0 (2026-04-04)
 
 This release improves mod list usability and suffix handling.
