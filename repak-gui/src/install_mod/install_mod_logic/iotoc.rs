@@ -2,19 +2,28 @@ use crate::install_mod::install_mod_logic::pak_files::repak_dir;
 use crate::install_mod::install_mod_logic::patch_meshes;
 use crate::install_mod::{InstallableMod, AES_KEY};
 use crate::utils::collect_files;
+use log::debug;
+use path_slash::PathExt;
 use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::ParallelIterator;
 use repak::Version;
+use retoc::*;
+use std::fs::File;
 use std::io::BufWriter;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::AtomicI32;
-use retoc::*;
 use std::sync::Arc;
-use log::debug;
-use std::fs::File;
-use path_slash::PathExt;
 
+const MOD_NAME_SUFFIX: &str = "_9999999_P";
+
+fn ensure_mod_name_suffix(name: &str) -> String {
+    if name.ends_with(MOD_NAME_SUFFIX) {
+        name.to_string()
+    } else {
+        format!("{name}{MOD_NAME_SUFFIX}")
+    }
+}
 
 pub fn convert_directory_to_iostore(
     pak: &InstallableMod,
@@ -24,16 +33,17 @@ pub fn convert_directory_to_iostore(
 ) -> Result<(), repak::Error> {
     let mod_type = pak.mod_type.clone();
     if mod_type == "Audio" || mod_type == "Movies" {
-        debug!("{} mod detected. Not creating iostore packages",mod_type);
+        debug!("{} mod detected. Not creating iostore packages", mod_type);
         repak_dir(pak, to_pak_dir, mod_dir, packed_files_count)?;
         return Ok(());
     }
 
+    let normalized_mod_name = ensure_mod_name_suffix(&pak.mod_name);
 
-    let mut pak_name = pak.mod_name.clone();
+    let mut pak_name = normalized_mod_name.clone();
     pak_name.push_str(".pak");
 
-    let mut utoc_name = pak.mod_name.clone();
+    let mut utoc_name = normalized_mod_name;
     utoc_name.push_str(".utoc");
 
     let mut paths = vec![];
@@ -104,4 +114,3 @@ pub fn convert_directory_to_iostore(
 
     // now generate the fake pak file
 }
-

@@ -10,6 +10,16 @@ use pak_files::create_repak_from_pak;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
+const MOD_NAME_SUFFIX: &str = "_9999999_P";
+
+pub(crate) fn ensure_mod_name_suffix(name: &str) -> String {
+    if name.ends_with(MOD_NAME_SUFFIX) {
+        name.to_string()
+    } else {
+        format!("{name}{MOD_NAME_SUFFIX}")
+    }
+}
+
 pub fn install_mods_in_viewport(
     mods: &mut [InstallableMod],
     mod_directory: &Path,
@@ -17,16 +27,17 @@ pub fn install_mods_in_viewport(
     stop_thread: &AtomicBool,
 ) {
     for installable_mod in mods.iter_mut() {
-        
-        if !installable_mod.enabled{
+        if !installable_mod.enabled {
             continue;
         }
-        
-        
+
         if stop_thread.load(Ordering::SeqCst) {
             warn!("Stopping thread");
             break;
         }
+
+        let normalized_mod_name = ensure_mod_name_suffix(&installable_mod.mod_name);
+        installable_mod.mod_name = normalized_mod_name.clone();
 
         if installable_mod.iostore {
             // copy the iostore files
@@ -34,11 +45,15 @@ pub fn install_mods_in_viewport(
             let utoc_path = installable_mod.mod_path.with_extension("utoc");
             let ucas_path = installable_mod.mod_path.with_extension("ucas");
 
-            let files_to_copy = vec![pak_path, utoc_path, ucas_path];
+            let files_to_copy = vec![
+                (pak_path, format!("{normalized_mod_name}.pak")),
+                (utoc_path, format!("{normalized_mod_name}.utoc")),
+                (ucas_path, format!("{normalized_mod_name}.ucas")),
+            ];
 
-            for file in files_to_copy {
-                if let Err(e) = std::fs::copy(&file, mod_directory.join(file.file_name().unwrap())) {
-                    error!("Unable to copy file {:?}: {:?}",file, e);
+            for (file, target_name) in files_to_copy {
+                if let Err(e) = std::fs::copy(&file, mod_directory.join(target_name)) {
+                    error!("Unable to copy file {:?}: {:?}", file, e);
                 }
             }
             continue;
@@ -63,7 +78,7 @@ pub fn install_mods_in_viewport(
             );
             std::fs::copy(
                 &installable_mod.mod_path,
-                mod_directory.join(format!("{}.pak", &installable_mod.mod_name)),
+                mod_directory.join(format!("{normalized_mod_name}.pak")),
             )
             .unwrap();
             installed_mods_ptr.fetch_add(1, std::sync::atomic::Ordering::SeqCst);

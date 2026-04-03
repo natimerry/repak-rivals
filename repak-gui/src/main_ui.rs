@@ -303,6 +303,7 @@ impl RepakModManager {
                             .to_string_lossy()
                             .to_string();
                         let display_name = normalize_mod_display_name(&raw_name.clone());
+                        let has_suffix_indicator = has_mod_suffix(&raw_name);
                         let raw_path = pak_file.path.to_string_lossy().to_string();
                         if !search_query.is_empty()
                             && !raw_name.to_lowercase().contains(&search_query)
@@ -317,18 +318,22 @@ impl RepakModManager {
                                 ui.set_max_width(ui.available_width() * 0.85);
                                 let pak_print = display_name;
 
-                                let color = if self.current_pak_file_idx == Some(i) {
-                                    Color32::from_hex("#f71034").unwrap()
-                                } else {
-                                    ui.style().visuals.faint_bg_color
-                                };
+                                let mut label_text = RichText::new(pak_print).strong();
+                                if self.current_pak_file_idx == Some(i) {
+                                    label_text = label_text
+                                        .background_color(Color32::from_hex("#f71034").unwrap());
+                                }
+
                                 let pakfile = ui.add(
-                                    Label::new(
-                                        RichText::new(pak_print).strong().background_color(color),
-                                    )
-                                    .truncate()
-                                    .selectable(true),
+                                    Label::new(label_text).truncate().selectable(true),
                                 );
+                                if has_suffix_indicator {
+                                    ui.label(
+                                        RichText::new("_9999999_P")
+                                            .size(self.default_font_size - 5.0)
+                                            .color(Color32::GRAY),
+                                    );
+                                }
 
                                 if pakfile.clicked() {
                                     self.current_pak_file_idx = Some(i);
@@ -797,5 +802,9 @@ impl eframe::App for RepakModManager {
 }
 
 fn normalize_mod_display_name(name: &str) -> String {
-    name.replace("_9999999_P", "")
+    name.replace("_9999999_P", "").replace("_999999_P", "")
+}
+
+fn has_mod_suffix(name: &str) -> bool {
+    name.ends_with("_9999999_P") || name.ends_with("_999999_P")
 }

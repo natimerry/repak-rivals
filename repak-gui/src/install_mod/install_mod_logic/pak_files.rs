@@ -16,6 +16,16 @@ use tempfile::tempdir;
 
 use super::iotoc::convert_directory_to_iostore;
 
+const MOD_NAME_SUFFIX: &str = "_9999999_P";
+
+fn ensure_mod_name_suffix(name: &str) -> String {
+    if name.ends_with(MOD_NAME_SUFFIX) {
+        name.to_string()
+    } else {
+        format!("{name}{MOD_NAME_SUFFIX}")
+    }
+}
+
 pub fn extract_pak_to_dir(pak: &InstallableMod, install_dir: PathBuf) -> Result<(), repak::Error> {
     let pak_reader = pak.clone().reader.clone().unwrap();
 
@@ -76,7 +86,6 @@ pub fn extract_pak_to_dir(pak: &InstallableMod, install_dir: PathBuf) -> Result<
     Ok(())
 }
 
-
 pub fn create_repak_from_pak(
     pak: &InstallableMod,
     mod_dir: PathBuf,
@@ -104,7 +113,7 @@ pub fn repak_dir(
     mod_dir: PathBuf,
     installed_mods_ptr: &AtomicI32,
 ) -> Result<(), repak::Error> {
-    let mut pak_name = pak.mod_name.clone();
+    let mut pak_name = ensure_mod_name_suffix(&pak.mod_name);
     pak_name.push_str(".pak");
     let output_file = File::create(mod_dir.join(pak_name))?;
 
