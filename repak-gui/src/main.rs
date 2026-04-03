@@ -341,7 +341,13 @@ fn main() {
         std::env::remove_var("WAYLAND_DISPLAY");
     }
 
-    let log_file = File::create("latest.log").expect("Failed to create log file");
+    let exe_path = std::env::current_exe().expect("Failed to get executable path");
+    let log_path = exe_path
+        .parent()
+        .expect("Failed to get executable directory")
+        .join("latest.log");
+    let log_file = File::create(&log_path).expect("Failed to create log file");
+
     let level_filter = if cfg!(debug_assertions) {
         LevelFilter::Debug
     } else {

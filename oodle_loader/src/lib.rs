@@ -253,7 +253,7 @@ mod test {
         compression and decompression.";
 
         let buffer = oodle
-            .compress(data, Compressor::Selkie, CompressionLevel::Optimal5)
+            .compress(data, Compressor::Kraken, CompressionLevel::Optimal5)
             .unwrap();
 
         dbg!((data.len(), buffer.len()));

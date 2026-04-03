@@ -317,7 +317,7 @@ fn compress(compression: Compression, data: &[u8]) -> Result<Vec<u8>> {
             {
                 oodle_loader::oodle().unwrap().compress(
                     data.as_ref(),
-                    oodle_loader::Compressor::Selkie,
+                    oodle_loader::Compressor::Kraken,
                     oodle_loader::CompressionLevel::Normal,
                 )?
             }
