@@ -183,8 +183,8 @@ jobs:
 
             request_body="$(jq -cn --arg filename "${filename}" --argjson size_bytes "${file_size}" '{filename: $filename, size_bytes: $size_bytes}')"
             upload_json="$(api_request POST "/uploads" "${request_body}")"
-            upload_id="$(jq -r '.id' <<<"${upload_json}")"
-            presigned_url="$(jq -r '.presigned_url' <<<"${upload_json}")"
+            upload_id="$(jq -r '.data.id' <<<"${upload_json}")"
+            presigned_url="$(jq -r '.data.presigned_url' <<<"${upload_json}")"
 
             curl --fail-with-body --silent --show-error \
               -X PUT \
@@ -211,9 +211,9 @@ jobs:
 
             request_body="$(jq -cn --arg filename "${filename}" --argjson size_bytes "${file_size}" '{filename: $filename, size_bytes: $size_bytes}')"
             upload_json="$(api_request POST "/uploads/multipart" "${request_body}")"
-            upload_id="$(jq -r '.id' <<<"${upload_json}")"
-            part_size="$(jq -r '.parts_size' <<<"${upload_json}")"
-            complete_url="$(jq -r '.complete_presigned_url' <<<"${upload_json}")"
+            upload_id="$(jq -r '.data.id' <<<"${upload_json}")"
+            part_size="$(jq -r '.data.parts_size' <<<"${upload_json}")"
+            complete_url="$(jq -r '.data.complete_presigned_url' <<<"${upload_json}")"
 
             part_dir="$(mktemp -d)"
             xml_file="$(mktemp)"
@@ -221,7 +221,8 @@ jobs:
             split -b "${part_size}" -d -a 5 --additional-suffix=.part "${file_path}" "${part_dir}/part-"
 
             mapfile -t part_files < <(find "${part_dir}" -maxdepth 1 -type f -name 'part-*' | sort)
-            mapfile -t part_urls < <(jq -r '.parts_presigned_url[]' <<<"${upload_json}")
+
+            mapfile -t part_urls < <(jq -r '.data.parts_presigned_url[]' <<<"${upload_json}")
             part_count="${#part_files[@]}"
 
             if [ "${part_count}" -ne "${#part_urls[@]}" ]; then
@@ -340,6 +341,6 @@ jobs:
               "${release_description}" \
               "${file_category}")"
 
-            nexus_file_id="$(jq -r '.id' <<<"${response}")"
+            nexus_file_id="$(jq -r '.data.id' <<<"${response}")"
             echo "Uploaded ${filename} to Nexus file group ${group_id} as file ${nexus_file_id}"
           done < "${{ steps.archives.outputs.manifest }}"
