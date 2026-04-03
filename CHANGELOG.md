@@ -1,7 +1,19 @@
 # Unreleased
 
 ## Changes:
-- Update the `retoc-rivals` submodule to revert `3c73098` and drop `7a0d71a`.
+- No changes yet.
+
+# Version 2.11.0 (2026-04-04)
+
+This release improves mod list usability and suffix handling.
+
+## Changes:
+- Add search to the GUI file table.
+- Add search to the mod files pane.
+- Strip `_9999999_P` / `_999999_P` from displayed mod names in the mod pane only.
+- Add a small gray `[9999]` indicator for mods that already include the suffix.
+- Ensure install/pack output names append `_9999999_P` when missing.
+- Restore mod row label highlight styling after suffix-indicator UI updates.
 
 # Version 2.10.2 (2026-04-04)
 
