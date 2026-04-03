@@ -2,7 +2,7 @@ extern crate core;
 
 use crate::file_table::FileTable;
 use crate::install_mod::{
-    self, map_dropped_file_to_mods, map_paths_to_mods, InstallableMod, ModInstallRequest, AES_KEY
+    self, map_dropped_file_to_mods, map_paths_to_mods, InstallableMod, ModInstallRequest, AES_KEY,
 };
 use crate::ios_widget;
 use crate::utils::find_marvel_rivals;
@@ -10,8 +10,8 @@ use crate::utils::get_current_pak_characteristics;
 use crate::utoc_utils::read_utoc;
 use crate::welcome::ShowWelcome;
 use eframe::egui::{
-    self, style::Selection, Align, Align2, Button, Color32, Id, Label, LayerId, Order,
-    RichText, ScrollArea, Stroke, Style, TextEdit, TextStyle, Theme,
+    self, style::Selection, Align, Align2, Button, Color32, Id, Label, LayerId, Order, RichText,
+    ScrollArea, Stroke, Style, TextEdit, TextStyle, Theme,
 };
 use egui_flex::{item, Flex, FlexAlign};
 use install_mod::install_mod_logic::pak_files::extract_pak_to_dir;
@@ -54,6 +54,8 @@ pub struct RepakModManager {
 
     #[serde(skip)]
     hide_welcome: bool,
+    #[serde(skip)]
+    mod_files_search_query: String,
     version: Option<String>,
 }
 
@@ -279,16 +281,41 @@ impl RepakModManager {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Search:");
+                        ui.add(
+                            TextEdit::singleline(&mut self.mod_files_search_query)
+                                .hint_text("Filter mod files...")
+                                .desired_width(220.0),
+                        );
+                        if ui.button("Clear").clicked() {
+                            self.mod_files_search_query.clear();
+                        }
+                    });
+                    ui.add_space(6.0);
+
                     for (i, pak_file) in self.pak_files.iter_mut().enumerate() {
+                        let search_query = self.mod_files_search_query.trim().to_lowercase();
+                        let raw_name = pak_file
+                            .path
+                            .file_stem()
+                            .unwrap()
+                            .to_string_lossy()
+                            .to_string();
+                        let display_name = normalize_mod_display_name(&raw_name.clone());
+                        let raw_path = pak_file.path.to_string_lossy().to_string();
+                        if !search_query.is_empty()
+                            && !raw_name.to_lowercase().contains(&search_query)
+                            && !display_name.to_lowercase().contains(&search_query)
+                            && !raw_path.to_lowercase().contains(&search_query)
+                        {
+                            continue;
+                        }
+
                         ui.horizontal(|ui| {
                             ui.with_layout(egui::Layout::left_to_right(Align::LEFT), |ui| {
                                 ui.set_max_width(ui.available_width() * 0.85);
-                                let pak_print = pak_file
-                                    .path
-                                    .file_stem()
-                                    .unwrap()
-                                    .to_string_lossy()
-                                    .to_string();
+                                let pak_print = display_name;
 
                                 let color = if self.current_pak_file_idx == Some(i) {
                                     Color32::from_hex("#f71034").unwrap()
@@ -436,7 +463,7 @@ impl RepakModManager {
             }
             config.version = Option::from(VERSION.to_string());
             config.hide_welcome = !show_welcome;
-            config.welcome_screen = Some(ShowWelcome{});
+            config.welcome_screen = Some(ShowWelcome {});
             config.receiver = Some(rx);
 
             Ok(config)
@@ -446,8 +473,8 @@ impl RepakModManager {
                 path.to_string_lossy()
             );
             let mut x = Self::new(ctx);
-            x.welcome_screen = Some(ShowWelcome{});
-            x.hide_welcome=false;
+            x.welcome_screen = Some(ShowWelcome {});
+            x.hide_welcome = false;
             x.receiver = Some(rx);
             Ok(x)
         };
@@ -686,9 +713,9 @@ impl RepakModManager {
 }
 impl eframe::App for RepakModManager {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if let Some(ref mut welcome) = self.welcome_screen{
-            if !self.hide_welcome{
-                welcome.welcome_screen(ctx,&mut self.hide_welcome);
+        if let Some(ref mut welcome) = self.welcome_screen {
+            if !self.hide_welcome {
+                welcome.welcome_screen(ctx, &mut self.hide_welcome);
             }
         }
 
@@ -767,4 +794,8 @@ impl eframe::App for RepakModManager {
             }
         }
     }
+}
+
+fn normalize_mod_display_name(name: &str) -> String {
+    name.replace("_9999999_P", "")
 }

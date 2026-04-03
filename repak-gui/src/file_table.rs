@@ -20,6 +20,7 @@ pub struct FileTable {
     file_contents: Vec<FileEntry>,
     selection: usize,
     showing_utoc: bool,
+    search_query: String,
 }
 
 #[derive(Clone, Debug)]
@@ -44,6 +45,7 @@ impl Default for FileTable {
             file_contents: vec![],
             selection: usize::MAX,
             showing_utoc: false,
+            search_query: String::new(),
         }
     }
 }
@@ -89,6 +91,34 @@ impl FileTable {
     }
 
     pub fn table_ui(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Search:");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.search_query)
+                    .hint_text("Filter by path...")
+                    .desired_width(300.0),
+            );
+            if ui.button("Clear").clicked() {
+                self.search_query.clear();
+            }
+        });
+        ui.add_space(8.0);
+
+        let search_query = self.search_query.trim().to_lowercase();
+        let filtered_indices: Vec<usize> = self
+            .file_contents
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| {
+                if search_query.is_empty() {
+                    return true;
+                }
+                let raw = entry.file_path.to_lowercase();
+                raw.contains(&search_query)
+            })
+            .map(|(idx, _)| idx)
+            .collect();
+
         let available_height = ui.available_height();
         let mut table = TableBuilder::new(ui)
             .striped(self.striped)
@@ -142,9 +172,9 @@ impl FileTable {
                 // });
             })
             .body(|body| {
-                // let mut file = self.file_contents.clone();
-                body.rows(20.0, self.file_contents.len(), |mut row| {
-                    let row_idx = row.index();
+                body.rows(20.0, filtered_indices.len(), |mut row| {
+                    let filtered_row_idx = row.index();
+                    let row_idx = filtered_indices[filtered_row_idx];
 
                     let entry = &mut self.file_contents[row_idx];
                     row.set_selected(self.selection == row_idx);
