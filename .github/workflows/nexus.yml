@@ -70,7 +70,9 @@ jobs:
             --pattern 'repak-gui-*.tar.xz'
 
       - name: Install dependencies
-        run: sudo apt-get install -y libarchive-tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --fix-missing libarchive-tools
 
       - name: Normalize archives for Nexus
         id: archives
