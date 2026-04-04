@@ -11,11 +11,15 @@ mod welcome;
 use crate::install_mod::install_mod_logic::iotoc::convert_directory_to_iostore;
 use crate::install_mod::map_to_mods_internal;
 use crate::main_ui::RepakModManager;
+use crate::utils::SkinEntry;
 use eframe::egui::{self, IconData};
 use log::{debug, info, LevelFilter};
 use retoc::{action_unpack, ActionUnpack, FGuid};
 use semver::Version;
-use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode, WriteLogger};
+use simplelog::{
+    ColorChoice, CombinedLogger, Config, ConfigBuilder, LevelPadding, TargetPadding, TermLogger,
+    TerminalMode, ThreadLogMode, WriteLogger,
+};
 use std::cell::LazyCell;
 use std::collections::HashMap;
 use std::env::args;
@@ -81,24 +85,93 @@ fn custom_panic(_info: &PanicHookInfo) -> ! {
 
 pub fn fetch_skins_in_background(
 ) -> thread::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>> {
+    info!("Fetching updated skin data");
     thread::spawn(|| {
         let client = reqwest::blocking::Client::new();
-
         let response = client
-            .get("https://rivals.natimerry.com/skins")
+            .get("https://raw.githubusercontent.com/donutman07/MarvelRivalsCharacterIDs/refs/heads/main/MarvelRivalsCharacterIDs.md")
             .send()?
             .error_for_status()?;
-
         let body = response.text()?;
-        debug!("Received response: {:?}", body);
+        debug!("Received markdown response ({} bytes)", body.len());
 
+        let skins = parse_markdown_to_skin_entries(&body);
+        debug!("Parsed {} skin entries", skins.len());
+
+        let json = serde_json::to_string_pretty(&skins)?;
         fs::create_dir_all("data")?;
-        fs::write("data/character_data.json", body)?;
-
+        fs::write("data/character_data.json", json)?;
         Ok(())
     })
 }
 
+fn parse_markdown_to_skin_entries(markdown: &str) -> Vec<SkinEntry> {
+    let mut entries = Vec::new();
+    let mut current_char_id: Option<String> = None;
+    let mut current_char_name: Option<String> = None;
+
+    for line in markdown.lines() {
+        let line = line.trim();
+        if !line.starts_with('|') {
+            continue;
+        }
+
+        if line.contains("NAME") || line.contains(":--:") {
+            continue;
+        }
+
+        let cols: Vec<&str> = line.split('|').map(|s| s.trim()).collect();
+
+        if cols.len() < 5 {
+            continue;
+        }
+
+        let id_col = cols[1];
+        let name_col = cols[2];
+        let skin_id_col = cols[3];
+        let skin_name_col = cols[4];
+
+        // Update current character if this row has an ID
+        if !id_col.is_empty() && id_col != "????" {
+            // Validate it's a numeric character ID
+            if id_col.chars().all(|c| c.is_ascii_digit()) {
+                current_char_id = Some(id_col.to_string());
+                current_char_name = Some(name_col.to_string());
+            } else {
+                current_char_id = None;
+                current_char_name = None;
+            }
+        }
+
+        // Only emit an entry if we have a valid skin ID
+        let skin_id = skin_id_col.trim();
+        if skin_id.is_empty() || !skin_id.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+
+        let Some(ref char_id) = current_char_id else {
+            continue;
+        };
+        let char_name = current_char_name.as_deref().unwrap_or("Unknown");
+        let skin_name = if skin_name_col.is_empty() {
+            // Fall back to character name for the base/default skin
+            char_name.to_string()
+        } else {
+            skin_name_col.to_string()
+        };
+
+        entries.push(SkinEntry {
+            skinid: skin_id.to_string(),
+            skin_name,
+            name: char_name.to_string(),
+        });
+
+        // Suppress unused variable warning when char_id is only used in the guard
+        let _ = char_id;
+    }
+
+    entries
+}
 pub fn fetch_mesh_list_in_bg(
 ) -> thread::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>> {
     thread::spawn(|| {
@@ -348,22 +421,33 @@ fn main() {
         .join("latest.log");
     let log_file = File::create(&log_path).expect("Failed to create log file");
 
-    let level_filter = if cfg!(debug_assertions) {
-        LevelFilter::Debug
-    } else {
-        LevelFilter::Info
-    };
+    let level_filter = LevelFilter::Debug;
+    let app_log_config = build_log_config(&[]);
+    let egui_log_config = build_log_config(&["egui", "eframe", "epaint"]);
 
     CombinedLogger::init(vec![
         TermLogger::new(
             level_filter,
-            Config::default(),
+            app_log_config.clone(),
             TerminalMode::Mixed,
             ColorChoice::Auto,
         ),
-        WriteLogger::new(LevelFilter::Info, Config::default(), log_file),
+        TermLogger::new(
+            LevelFilter::Info,
+            egui_log_config.clone(),
+            TerminalMode::Mixed,
+            ColorChoice::Auto,
+        ),
+        WriteLogger::new(level_filter, app_log_config, log_file.try_clone().expect("Failed to clone log file")),
+        WriteLogger::new(LevelFilter::Info, egui_log_config, log_file),
     ])
     .expect("Failed to initialize logger");
+
+    info!(
+        target: "repak_gui::main::logger_init",
+        "Logger initialized at {:?}; egui-family targets restricted to info and above",
+        log_path
+    );
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -373,8 +457,6 @@ fn main() {
             .with_icon(ICON.clone()),
         ..Default::default()
     };
-
-    info!("Fetching updated skin data");
 
     // spawn a background thread to get skins
     #[cfg(not(debug_assertions))]
@@ -394,4 +476,29 @@ fn main() {
         }),
     )
     .expect("Unable to spawn windows");
+}
+
+fn build_log_config(allowed_targets: &[&'static str]) -> Config {
+    let mut builder = ConfigBuilder::new();
+    builder
+        .set_time_level(LevelFilter::Error)
+        .set_max_level(LevelFilter::Error)
+        .set_target_level(LevelFilter::Error)
+        .set_location_level(LevelFilter::Debug)
+        .set_thread_level(LevelFilter::Trace)
+        .set_thread_mode(ThreadLogMode::Names)
+        .set_level_padding(LevelPadding::Right)
+        .set_target_padding(TargetPadding::Right);
+
+    for target in allowed_targets {
+        builder.add_filter_allow_str(target);
+    }
+
+    if allowed_targets.is_empty() {
+        for target in ["egui", "eframe", "epaint"] {
+            builder.add_filter_ignore_str(target);
+        }
+    }
+
+    builder.build()
 }

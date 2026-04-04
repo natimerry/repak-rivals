@@ -5,11 +5,11 @@ use std::sync::LazyLock;
 use std::{fs, io};
 
 #[derive(Debug, Deserialize, Serialize, Hash)]
-struct SkinEntry {
-    skinid: String,
+pub struct SkinEntry {
+    pub skinid: String,
     #[serde(rename = "skin_name")]
-    skin_name: String,
-    name: String,
+    pub skin_name: String,
+    pub name: String,
 }
 // we grab the locally found character_data.json otherwise we let the program use the build time
 // provided one
