@@ -3,6 +3,11 @@
 ## Changes:
 - No changes yet.
 
+# Version 2.11.1 (2026-04-05)
+
+- Fetch updated character ids from table
+- Improve logging system
+
 # Version 2.11.1 (2026-04-04)
 
 This release improves mod list usability and suffix handling.
