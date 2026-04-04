@@ -3,7 +3,7 @@
 ## Changes:
 - No changes yet.
 
-# Version 2.11.1 (2026-04-05)
+# Version 2.11.2 (2026-04-05)
 
 - Fetch updated character ids from table
 - Improve logging system

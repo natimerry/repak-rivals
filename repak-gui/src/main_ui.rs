@@ -18,11 +18,13 @@ use install_mod::install_mod_logic::pak_files::extract_pak_to_dir;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use path_clean::PathClean;
 use repak::PakReader;
+use retoc::ActionUnpack;
 use rfd::{FileDialog, MessageButtons};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::mpsc::{channel, Receiver};
 use std::time::Duration;
 use std::{fs, thread};
@@ -355,16 +357,45 @@ impl RepakModManager {
                                             let mod_name = pak_file.path.file_stem().unwrap().to_string_lossy().to_string();
                                             let to_create = dir.join(&mod_name);
                                             fs::create_dir_all(&to_create).unwrap();
+                                            // check if installable file has a utoc file present and do a utoc extract if present
+                                            //
+                                            let mut utoc_path = pak_file.path.clone();
+                                            utoc_path.set_extension("utoc");
 
-                                            let installable_mod = InstallableMod{
-                                                mod_name: mod_name.clone(),
-                                                mod_type: "".to_string(),
-                                                reader: Option::from(pak_file.reader.clone()),
-                                                mod_path: pak_file.path.clone(),
-                                                ..Default::default()
-                                            };
-                                            if let Err(e) = extract_pak_to_dir(&installable_mod,to_create){
-                                                error!(mod_path = ?pak_file.path, error = %e, "Failed to extract mod");
+                                            if utoc_path.exists(){
+                                                info!("Extracting as utoc...");
+                                                let action: ActionUnpack = ActionUnpack {
+                                                    utoc: PathBuf::from(&utoc_path),
+                                                    output: to_create,
+                                                    verbose: true,
+                                                };
+
+                                                let mut config = retoc::Config {
+                                                    container_header_version_override: None,
+                                                    ..Default::default()
+                                                };
+
+                                                let aes_toc = retoc::AesKey::from_str(
+                                                    "0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74",
+                                                )
+                                                .unwrap();
+
+                                                config.aes_keys.insert(retoc::FGuid::default(), aes_toc.clone());
+                                                let config = std::sync::Arc::new(config);
+
+                                                retoc::action_unpack(action, config).expect("Failed to extract");
+                                            }
+                                            else {
+                                                let installable_mod = InstallableMod{
+                                                    mod_name: mod_name.clone(),
+                                                    mod_type: "".to_string(),
+                                                    reader: Option::from(pak_file.reader.clone()),
+                                                    mod_path: pak_file.path.clone(),
+                                                    ..Default::default()
+                                                };
+                                                if let Err(e) = extract_pak_to_dir(&installable_mod,to_create){
+                                                    error!(mod_path = ?pak_file.path, error = %e, "Failed to extract mod");
+                                                }
                                             }
                                         }
                                     }
@@ -613,7 +644,10 @@ impl RepakModManager {
                         error!("Selected directories did not contain installable mods");
                         return;
                     }
-                    info!(selected_mods = mods.len(), "Prepared mods from directory picker");
+                    info!(
+                        selected_mods = mods.len(),
+                        "Prepared mods from directory picker"
+                    );
                     self.file_drop_viewport_open = true;
                     self.install_mod_dialog =
                         Some(ModInstallRequest::new(mods, self.game_path.clone()));
