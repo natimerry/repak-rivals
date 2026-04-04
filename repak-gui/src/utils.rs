@@ -21,7 +21,6 @@ static SKIN_ENTRIES: LazyLock<HashMap<u32, SkinEntry>> = LazyLock::new(|| {
 
     let skins: Vec<SkinEntry> =
         serde_json::from_str(&json_data).expect("Invalid character_data.json");
-
     skins
         .into_iter()
         .map(|entry| {
@@ -88,7 +87,7 @@ pub fn get_current_pak_characteristics(mod_contents: Vec<String>) -> String {
             "Characters" => match get_character_mod_skin(path) {
                 Some(ModType::Custom(skin)) => return skin,
                 Some(ModType::Default(name)) => fallback = Some(name),
-                None => return "Character (Unknown)".to_string(),
+                None => {}
             },
             "UI" => return "UI".to_string(),
             "Movies" => return "Movies".to_string(),
@@ -97,7 +96,7 @@ pub fn get_current_pak_characteristics(mod_contents: Vec<String>) -> String {
         }
     }
 
-    fallback.unwrap_or_else(|| "Unknown".to_string())
+    fallback.unwrap_or_else(|| "Character (Unknown)".to_string())
 }
 
 use regex_lite::Regex;

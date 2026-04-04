@@ -136,8 +136,34 @@ fn parse_markdown_to_skin_entries(markdown: &str) -> Vec<SkinEntry> {
         if !id_col.is_empty() && id_col != "????" {
             // Validate it's a numeric character ID
             if id_col.chars().all(|c| c.is_ascii_digit()) {
+                let name = name_col.to_string();
+                // Skip placeholder/old/bot entries that would override real characters
+                let is_placeholder = name.contains("(Old)")
+                    || name.contains("Old)")
+                    || name_col.is_empty()
+                    || name.ends_with("Bot")
+                    || name.contains("Bot (")
+                    || name.starts_with("Zombie")
+                    || name.starts_with("No Data")
+                    || name.contains("Mislabeled");
+
+                if is_placeholder {
+                    current_char_id = None;
+                    current_char_name = None;
+                    continue; // don't update current character context
+                }
+
                 current_char_id = Some(id_col.to_string());
                 current_char_name = Some(name_col.to_string());
+
+                // Generate default skin entry: 4-digit char ID + "001"
+                let default_skin_id = format!("{}001", id_col);
+                let default_skin_name = "(Default)".to_string();
+                entries.push(SkinEntry {
+                    skinid: default_skin_id,
+                    skin_name: default_skin_name,
+                    name: name_col.to_string(),
+                });
             } else {
                 current_char_id = None;
                 current_char_name = None;
@@ -439,7 +465,6 @@ fn main() {
     };
 
     // spawn a background thread to get skins
-    #[cfg(not(debug_assertions))]
     fetch_skins_in_background();
 
     #[cfg(not(debug_assertions))]

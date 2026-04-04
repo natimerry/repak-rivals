@@ -325,7 +325,7 @@ impl RepakModManager {
                                 ui.set_max_width(ui.available_width() * 0.85);
                                 let pak_print = display_name;
 
-                                let mut label_text = RichText::new(pak_print).strong();
+                                let mut label_text = RichText::new(&pak_print).strong();
                                 if self.current_pak_file_idx == Some(i) {
                                     label_text = label_text
                                         .background_color(Color32::from_hex("#f71034").unwrap());
@@ -334,7 +334,8 @@ impl RepakModManager {
                                 let pakfile = ui.add(
                                     Label::new(label_text).truncate().selectable(true),
                                 );
-                                if has_suffix_indicator {
+                                let len = (&pak_print.clone()).len();
+                                if has_suffix_indicator && len < 30 {
                                     ui.label(
                                         RichText::new("_9999999_P")
                                             .size(self.default_font_size - 5.0)
