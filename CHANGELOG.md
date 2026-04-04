@@ -3,6 +3,10 @@
 ## Changes:
 - No changes yet.
 
+# Version 2.11.3 (2026-04-05)
+
+- Add the ability to extract both `.pak` and `IOStore` mods from the GUI right click
+
 # Version 2.11.2 (2026-04-05)
 
 - Fetch updated character ids from table
