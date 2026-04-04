@@ -5,10 +5,10 @@ pub mod patch_meshes;
 
 use crate::install_mod::InstallableMod;
 use iotoc::convert_directory_to_iostore;
-use log::{error, info, warn};
 use pak_files::create_repak_from_pak;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use tracing::{error, info, instrument, warn};
 
 const MOD_NAME_SUFFIX: &str = "_9999999_P";
 
@@ -20,19 +20,22 @@ pub(crate) fn ensure_mod_name_suffix(name: &str) -> String {
     }
 }
 
+#[instrument(skip(mods, installed_mods_ptr, stop_thread), fields(queued_mods = mods.len(), mod_directory = ?mod_directory))]
 pub fn install_mods_in_viewport(
     mods: &mut [InstallableMod],
     mod_directory: &Path,
     installed_mods_ptr: &AtomicI32,
     stop_thread: &AtomicBool,
 ) {
+    info!("Installing queued mods");
     for installable_mod in mods.iter_mut() {
         if !installable_mod.enabled {
+            info!(mod_name = %installable_mod.mod_name, "Skipping disabled mod");
             continue;
         }
 
         if stop_thread.load(Ordering::SeqCst) {
-            warn!("Stopping thread");
+            warn!(mod_name = %installable_mod.mod_name, "Stopping install worker");
             break;
         }
 
@@ -40,6 +43,7 @@ pub fn install_mods_in_viewport(
         installable_mod.mod_name = normalized_mod_name.clone();
 
         if installable_mod.iostore {
+            info!(mod_name = %installable_mod.mod_name, mod_path = ?installable_mod.mod_path, "Copying iostore mod");
             // copy the iostore files
             let pak_path = installable_mod.mod_path.with_extension("pak");
             let utoc_path = installable_mod.mod_path.with_extension("utoc");
@@ -53,19 +57,20 @@ pub fn install_mods_in_viewport(
 
             for (file, target_name) in files_to_copy {
                 if let Err(e) = std::fs::copy(&file, mod_directory.join(target_name)) {
-                    error!("Unable to copy file {:?}: {:?}", file, e);
+                    error!(?file, error = ?e, "Unable to copy file");
                 }
             }
             continue;
         }
 
         if installable_mod.repak {
+            info!(mod_name = %installable_mod.mod_name, mod_path = ?installable_mod.mod_path, "Repacking mod");
             if let Err(e) = create_repak_from_pak(
                 installable_mod,
                 PathBuf::from(mod_directory),
                 installed_mods_ptr,
             ) {
-                error!("Failed to create repak from pak: {}", e);
+                error!(mod_name = %installable_mod.mod_name, error = %e, "Failed to create repak from pak");
             }
         }
 
@@ -73,8 +78,9 @@ pub fn install_mods_in_viewport(
         if !installable_mod.repak && !installable_mod.is_dir {
             // just move files to the correct location
             info!(
-                "Copying mod instead of repacking: {}",
-                installable_mod.mod_name
+                mod_name = %installable_mod.mod_name,
+                mod_path = ?installable_mod.mod_path,
+                "Copying pak mod directly"
             );
             std::fs::copy(
                 &installable_mod.mod_path,
@@ -93,12 +99,13 @@ pub fn install_mods_in_viewport(
                 installed_mods_ptr,
             );
             if let Err(e) = res {
-                error!("Failed to create repak from pak: {}", e);
+                error!(mod_name = %installable_mod.mod_name, mod_path = ?installable_mod.mod_path, error = %e, "Failed to convert directory");
             } else {
-                info!("Installed mod: {}", installable_mod.mod_name);
+                info!(mod_name = %installable_mod.mod_name, "Installed directory mod");
             }
         }
     }
     // set i32 to -255 magic value to indicate mod installation is done
     AtomicI32::store(installed_mods_ptr, -255, Ordering::SeqCst);
+    info!("Install worker finished");
 }

@@ -10,6 +10,7 @@ use std::fs::File;
 use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use tracing::{info, instrument};
 
 pub struct FileTable {
     striped: bool,
@@ -216,6 +217,7 @@ impl FileTable {
         }
     }
 }
+#[instrument(skip(ui, entry), fields(file_path = %entry.file_path, is_utoc))]
 fn show_ctx_menu(ui: &mut egui::Ui, entry: &FileEntry, is_utoc: bool) {
     if ui.button("Extract").clicked() {
         if is_utoc {
@@ -229,7 +231,7 @@ fn show_ctx_menu(ui: &mut egui::Ui, entry: &FileEntry, is_utoc: bool) {
             if let Some(path) = dialog {
                 let root = path.file_stem().unwrap().to_str().unwrap();
                 let result_path = path.parent().unwrap().join(root);
-                println!("Creating directory: {:?}", &result_path);
+                info!(?result_path, "Creating extraction directory");
 
                 let _ = std::fs::create_dir(&result_path)
                     .expect("Failed to create extraction directory");

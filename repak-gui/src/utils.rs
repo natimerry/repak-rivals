@@ -100,27 +100,31 @@ pub fn get_current_pak_characteristics(mod_contents: Vec<String>) -> String {
     fallback.unwrap_or_else(|| "Unknown".to_string())
 }
 
-use log::info;
 use regex_lite::Regex;
 use serde::{Deserialize, Serialize};
+use tracing::{debug, info, instrument, warn};
 
+#[instrument]
 pub fn find_marvel_rivals() -> Option<PathBuf> {
-    let shit = get_steam_library_paths();
-    if shit.is_empty() {
+    let library_paths = get_steam_library_paths();
+    if library_paths.is_empty() {
+        warn!("No Steam library paths were detected");
         return None;
     }
 
-    for lib in shit {
+    for lib in library_paths {
         let path = lib.join("steamapps/common/MarvelRivals/MarvelGame/Marvel/Content/Paks");
         if path.exists() {
+            info!(?path, "Detected Marvel Rivals install");
             return Some(path);
         }
     }
-    println!("Marvel Rivals not found.");
+    warn!("Marvel Rivals install path was not found in discovered Steam libraries");
     None
 }
 
 /// Reads `libraryfolders.vdf` to find additional Steam libraries.
+#[instrument]
 fn get_steam_library_paths() -> Vec<PathBuf> {
     #[cfg(target_os = "windows")]
     let vdf_path = PathBuf::from("C:/Program Files (x86)/Steam/steamapps/libraryfolders.vdf");
@@ -129,6 +133,7 @@ fn get_steam_library_paths() -> Vec<PathBuf> {
     let vdf_path = PathBuf::from("~/.steam/steam/steamapps/libraryfolders.vdf");
 
     if !vdf_path.exists() {
+        debug!(?vdf_path, "Steam library manifest not found");
         return vec![];
     }
 
@@ -148,7 +153,7 @@ fn get_steam_library_paths() -> Vec<PathBuf> {
                 .split("\"")
                 .nth(3)
                 .map(|s| PathBuf::from(s.replace("\\\\", "\\")));
-            info!("Found steam library path: {:?}", path);
+            info!(?path, "Found Steam library path");
             paths.push(path.unwrap());
         }
     }

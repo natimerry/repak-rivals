@@ -10,7 +10,6 @@ use eframe::egui::{Align, Checkbox, ComboBox, Context, Label, TextEdit};
 use egui_extras::{Column, TableBuilder};
 use egui_flex::{item, Flex, FlexAlign};
 use install_mod_logic::install_mods_in_viewport;
-use log::{debug, error};
 use repak::utils::AesKey;
 use repak::Compression::Oodle;
 use repak::{Compression, PakReader};
@@ -23,6 +22,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32};
 use std::sync::{Arc, LazyLock};
 use std::thread;
 use tempfile::tempdir;
+use tracing::{debug, error, info, instrument, warn};
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone)]
@@ -79,8 +79,10 @@ pub struct ModInstallRequest {
     pub stop_thread: Arc<AtomicBool>,
 }
 impl ModInstallRequest {
+    #[instrument(skip(mods), fields(mod_count = mods.len(), mod_directory = ?mod_directory))]
     pub fn new(mods: Vec<InstallableMod>, mod_directory: PathBuf) -> Self {
         let len = mods.iter().map(|m| m.total_files).sum::<usize>();
+        info!("Created install request");
         Self {
             animate: false,
             mods,
@@ -94,6 +96,7 @@ impl ModInstallRequest {
 }
 
 impl ModInstallRequest {
+    #[instrument(skip(self, ctx, show_callback), fields(mod_count = self.mods.len(), mod_directory = ?self.mod_directory))]
     pub fn new_mod_dialog(&mut self, ctx: &egui::Context, show_callback: &mut bool) {
         let viewport_options = egui::ViewportBuilder::default()
             .with_title("Install mods")
@@ -142,11 +145,13 @@ impl ModInstallRequest {
 
                                 let cancel = ui.add(item(), egui::Button::new("Cancel"));
                                 cancel.clicked().then(|| {
+                                    info!("Cancelling install dialog");
                                     self.stop_thread.store(true, SeqCst);
                                     *show_callback = false;
                                 });
 
                                 if install_mod.clicked() {
+                                    info!("Starting install worker");
                                     let mut mods = self.mods.to_vec(); // clone
 
                                     let dir = self.mod_directory.clone();
@@ -185,6 +190,7 @@ impl ModInstallRequest {
                         }
                     });
                 if ctx.input(|i| i.viewport().close_requested()) {
+                    warn!("Install dialog viewport was closed");
                     // Tell parent viewport that we should not show next frame:
                     *show_callback = false;
                 }
@@ -350,8 +356,10 @@ pub static AES_KEY: LazyLock<AesKey> = LazyLock::new(|| {
         .expect("Unable to initialise AES_KEY")
 });
 
+#[instrument(fields(path))]
 fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
     let mut new_mods = Vec::<InstallableMod>::new();
+    debug!("Scanning extracted archive directory");
     for entry in WalkDir::new(path) {
         let entry = entry.expect("Failed to read directory entry");
         let path = entry.path();
@@ -409,6 +417,7 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                     ..Default::default()
                 };
 
+                debug!(mod_name = %installable_mod.mod_name, mod_type = %installable_mod.mod_type, "Discovered archived mod");
                 new_mods.push(installable_mod);
             }
         }
@@ -417,8 +426,10 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
     new_mods
 }
 
+#[instrument(skip(paths), fields(path_count = paths.len()))]
 pub fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
     let mut extensible_vec: Vec<InstallableMod> = Vec::new();
+    info!("Mapping paths into installable mods");
     let mut installable_mods = paths
         .iter()
         .map(|path| {
@@ -431,6 +442,7 @@ pub fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
             let mut len = 1;
 
             if !is_dir && !is_archive {
+                debug!(?path, "Inspecting pak file");
                 let builder = repak::PakBuilder::new()
                     .key(AES_KEY.clone().0)
                     .reader(&mut BufReader::new(File::open(path.clone()).unwrap()));
@@ -441,13 +453,14 @@ pub fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
                         len = builder.files().len();
                     }
                     Err(e) => {
-                        error!("Error reading pak file: {}", e);
+                        error!(?path, error = %e, "Error reading pak file");
                         return Err(e);
                     }
                 }
             }
 
             if is_dir {
+                debug!(?path, "Inspecting directory mod");
                 let mut files = vec![];
                 collect_files(&mut files, path)?;
                 let files = files
@@ -459,6 +472,7 @@ pub fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
             }
 
             if is_archive {
+                info!(?path, "Extracting archive for inspection");
                 modtype = "Season 2 Archives".to_string();
                 let tempdir = tempdir()
                     .unwrap()
@@ -500,7 +514,7 @@ pub fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
 
     installable_mods.extend(extensible_vec);
 
-    debug!("Install mods: {:?}", installable_mods);
+    debug!("Mapped installable mods: {:?}", installable_mods);
     installable_mods
 }
 

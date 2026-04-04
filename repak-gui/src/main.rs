@@ -13,13 +13,8 @@ use crate::install_mod::map_to_mods_internal;
 use crate::main_ui::RepakModManager;
 use crate::utils::SkinEntry;
 use eframe::egui::{self, IconData};
-use log::{debug, info, LevelFilter};
 use retoc::{action_unpack, ActionUnpack, FGuid};
 use semver::Version;
-use simplelog::{
-    ColorChoice, CombinedLogger, Config, ConfigBuilder, LevelPadding, TargetPadding, TermLogger,
-    TerminalMode, ThreadLogMode, WriteLogger,
-};
 use std::cell::LazyCell;
 use std::collections::HashMap;
 use std::env::args;
@@ -32,6 +27,10 @@ use std::str::FromStr;
 use std::sync::atomic::AtomicI32;
 use std::sync::Arc;
 use std::thread;
+use tracing::{debug, info, instrument};
+use tracing_subscriber::filter::{LevelFilter, Targets};
+use tracing_subscriber::fmt;
+use tracing_subscriber::prelude::*;
 use walkdir::WalkDir;
 
 #[cfg(target_os = "windows")]
@@ -83,6 +82,7 @@ fn custom_panic(_info: &PanicHookInfo) -> ! {
     std::process::exit(1);
 }
 
+#[instrument(name = "fetch_skins_in_background")]
 pub fn fetch_skins_in_background(
 ) -> thread::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>> {
     info!("Fetching updated skin data");
@@ -105,6 +105,7 @@ pub fn fetch_skins_in_background(
     })
 }
 
+#[instrument(skip(markdown))]
 fn parse_markdown_to_skin_entries(markdown: &str) -> Vec<SkinEntry> {
     let mut entries = Vec::new();
     let mut current_char_id: Option<String> = None;
@@ -172,6 +173,7 @@ fn parse_markdown_to_skin_entries(markdown: &str) -> Vec<SkinEntry> {
 
     entries
 }
+#[instrument(name = "fetch_mesh_list_in_bg")]
 pub fn fetch_mesh_list_in_bg(
 ) -> thread::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>> {
     thread::spawn(|| {
@@ -201,6 +203,7 @@ struct GithubRelease {
     tag_name: String,
 }
 
+#[instrument(skip(current_version), fields(current_version))]
 pub fn check_repak_rivals_version(current_version: &str) {
     let client = reqwest::blocking::Client::new();
 
@@ -419,32 +422,9 @@ fn main() {
         .parent()
         .expect("Failed to get executable directory")
         .join("latest.log");
-    let log_file = File::create(&log_path).expect("Failed to create log file");
-
-    let level_filter = LevelFilter::Debug;
-    let app_log_config = build_log_config(&[]);
-    let egui_log_config = build_log_config(&["egui", "eframe", "epaint"]);
-
-    CombinedLogger::init(vec![
-        TermLogger::new(
-            level_filter,
-            app_log_config.clone(),
-            TerminalMode::Mixed,
-            ColorChoice::Auto,
-        ),
-        TermLogger::new(
-            LevelFilter::Info,
-            egui_log_config.clone(),
-            TerminalMode::Mixed,
-            ColorChoice::Auto,
-        ),
-        WriteLogger::new(level_filter, app_log_config, log_file.try_clone().expect("Failed to clone log file")),
-        WriteLogger::new(LevelFilter::Info, egui_log_config, log_file),
-    ])
-    .expect("Failed to initialize logger");
+    let _log_guard = init_tracing(&log_path);
 
     info!(
-        target: "repak_gui::main::logger_init",
         "Logger initialized at {:?}; egui-family targets restricted to info and above",
         log_path
     );
@@ -478,27 +458,73 @@ fn main() {
     .expect("Unable to spawn windows");
 }
 
-fn build_log_config(allowed_targets: &[&'static str]) -> Config {
-    let mut builder = ConfigBuilder::new();
-    builder
-        .set_time_level(LevelFilter::Error)
-        .set_max_level(LevelFilter::Error)
-        .set_target_level(LevelFilter::Error)
-        .set_location_level(LevelFilter::Debug)
-        .set_thread_level(LevelFilter::Trace)
-        .set_thread_mode(ThreadLogMode::Names)
-        .set_level_padding(LevelPadding::Right)
-        .set_target_padding(TargetPadding::Right);
+fn init_tracing(log_path: &std::path::Path) -> tracing_appender::non_blocking::WorkerGuard {
+    let log_directory = log_path.parent().expect("Failed to get log directory");
+    let log_filename = log_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("Failed to get log filename");
 
-    for target in allowed_targets {
-        builder.add_filter_allow_str(target);
-    }
+    let file_appender = tracing_appender::rolling::never(log_directory, log_filename);
+    let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
 
-    if allowed_targets.is_empty() {
-        for target in ["egui", "eframe", "epaint"] {
-            builder.add_filter_ignore_str(target);
-        }
-    }
+    let app_filter = Targets::default()
+        .with_default(LevelFilter::DEBUG)
+        .with_target("egui", LevelFilter::OFF)
+        .with_target("eframe", LevelFilter::OFF)
+        .with_target("epaint", LevelFilter::OFF);
+    let egui_filter = Targets::default()
+        .with_default(LevelFilter::OFF)
+        .with_target("egui", LevelFilter::INFO)
+        .with_target("eframe", LevelFilter::INFO)
+        .with_target("epaint", LevelFilter::INFO);
 
-    builder.build()
+    let terminal_format = fmt::format()
+        .compact()
+        .with_target(false)
+        .with_thread_names(true)
+        .with_thread_ids(true)
+        .with_file(true)
+        .with_line_number(true);
+    let file_format = fmt::format()
+        .compact()
+        .with_ansi(false)
+        .with_target(false)
+        .with_thread_names(true)
+        .with_thread_ids(true)
+        .with_file(true)
+        .with_line_number(true);
+
+    tracing_subscriber::registry()
+        .with(
+            fmt::layer()
+                .event_format(terminal_format.clone())
+                .with_writer(std::io::stderr)
+                .with_ansi(true)
+                .with_filter(app_filter.clone()),
+        )
+        .with(
+            fmt::layer()
+                .event_format(terminal_format)
+                .with_writer(std::io::stderr)
+                .with_ansi(true)
+                .with_filter(egui_filter.clone()),
+        )
+        .with(
+            fmt::layer()
+                .event_format(file_format.clone())
+                .with_writer(file_writer.clone())
+                .with_ansi(false)
+                .with_filter(app_filter),
+        )
+        .with(
+            fmt::layer()
+                .event_format(file_format)
+                .with_writer(file_writer)
+                .with_ansi(false)
+                .with_filter(egui_filter),
+        )
+        .init();
+
+    guard
 }
