@@ -1,0 +1,24 @@
+[package]
+name = "repak-cli2"
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+keywords.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow = "1.0.98"
+clap = { version = "4.5.31", features = ["derive"] }
+comfy-table = "7.1.1"
+glob = "0.3.2"
+indicatif = "0.17.11"
+path-slash = "0.2.1"
+rayon = "1.10.0"
+regex-lite = "0.1.5"
+repak = { path = "../repak", features = ["oodle", "encryption"] }
+serde = { version = "1.0.218", features = ["derive"] }
+serde_json = "1.0.139"
+unreal-packaging-backend = { path = "../unreal-packaging-backend" }
+uasset-mesh-patch-rivals = { path = "../uasset-mesh-patch-rivals" }
+walkdir = "2.5.0"
