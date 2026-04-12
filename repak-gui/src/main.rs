@@ -504,18 +504,16 @@ fn init_tracing(log_path: &std::path::Path) -> tracing_appender::non_blocking::W
         .with_target("epaint", LevelFilter::INFO);
 
     let terminal_format = fmt::format()
-        .compact()
         .with_target(false)
-        .with_thread_names(true)
-        .with_thread_ids(true)
+        .with_thread_names(false)
+        .with_thread_ids(false)
         .with_file(true)
         .with_line_number(true);
     let file_format = fmt::format()
-        .compact()
         .with_ansi(false)
         .with_target(false)
-        .with_thread_names(true)
-        .with_thread_ids(true)
+        .with_thread_names(false)
+        .with_thread_ids(false)
         .with_file(true)
         .with_line_number(true);
 
