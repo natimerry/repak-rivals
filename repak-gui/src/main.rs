@@ -286,6 +286,7 @@ fn main() {
     */
 
     let args = args().collect::<Vec<String>>();
+    let path_reset = args.iter().any(|arg| arg == "--path-reset");
     if args.len() > 1 {
         if args[1] == "--extract" {
             for _file in &args[2..] {
@@ -475,9 +476,7 @@ fn main() {
         Box::new(|cc| {
             cc.egui_ctx
                 .style_mut(|style| style.visuals.dark_mode = true);
-            Ok(Box::new(
-                RepakModManager::load(cc).expect("Unable to load config"),
-            ))
+            Ok(Box::new(RepakModManager::load(cc, path_reset).expect("Unable to load config")))
         }),
     )
     .expect("Unable to spawn windows");

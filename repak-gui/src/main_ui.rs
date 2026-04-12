@@ -449,13 +449,36 @@ impl RepakModManager {
     }
 
     #[instrument(skip(ctx))]
-    pub fn load(ctx: &eframe::CreationContext) -> std::io::Result<Self> {
+    pub fn load(ctx: &eframe::CreationContext, path_reset: bool) -> std::io::Result<Self> {
         let (tx, rx) = channel();
         let path = Self::config_path();
+        let mut persist_config = false;
         let mut shit = if path.exists() {
             info!("Loading config: {}", path.to_string_lossy());
             let data = fs::read_to_string(path)?;
             let mut config: Self = serde_json::from_str(&data)?;
+
+            if path_reset {
+                info!("--path-reset requested; forcing Steam path detection");
+                if let Some(path) = find_marvel_rivals() {
+                    let mods_path = path.join("~mods").clean();
+                    if let Err(e) = fs::create_dir_all(&mods_path) {
+                        warn!(
+                            path = %mods_path.to_string_lossy(),
+                            error = %e,
+                            "Failed to create detected mods directory"
+                        );
+                    } else {
+                        info!(path = %mods_path.to_string_lossy(), "Using detected Steam mods path");
+                    }
+                    config.game_path = mods_path;
+                    persist_config = true;
+                } else {
+                    warn!(
+                        "Steam install was not detected during --path-reset; keeping configured path"
+                    );
+                }
+            }
 
             debug!("Setting custom style");
             setup_custom_style(&ctx.egui_ctx);
@@ -511,6 +534,11 @@ impl RepakModManager {
                 }
             });
             shit.collect_pak_files();
+            if persist_config {
+                if let Err(e) = shit.save_state() {
+                    warn!(error = %e, "Failed to persist --path-reset path update to config");
+                }
+            }
         }
 
         shit
