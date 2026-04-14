@@ -7,6 +7,12 @@ edition.workspace = true
 keywords.workspace = true
 version.workspace = true
 
+[package.metadata.wix]
+upgrade-guid = "9CB30CA6-ACB3-4504-B56F-8B47B621C6F9"
+path-guid = "32652AE6-D9DA-456D-88AE-2DF4884EEAA9"
+license = false
+eula = false
+
 [dependencies]
 anyhow = "1.0.98"
 clap = { version = "4.5.31", features = ["derive"] }
