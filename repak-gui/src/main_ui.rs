@@ -25,9 +25,8 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::mpsc::{channel, Receiver};
-use std::time::Duration;
-use std::{fs, thread};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::fs;
 use tracing::{debug, error, info, instrument, trace, warn};
 use walkdir::WalkDir;
 
@@ -50,6 +49,10 @@ pub struct RepakModManager {
     install_mod_dialog: Option<ModInstallRequest>,
     #[serde(skip)]
     receiver: Option<Receiver<Event>>,
+    #[serde(skip)]
+    watcher_tx: Option<Sender<Event>>,
+    #[serde(skip)]
+    watcher: Option<RecommendedWatcher>,
 
     #[serde(skip)]
     welcome_screen: Option<ShowWelcome>,
@@ -179,8 +182,51 @@ impl RepakModManager {
                 vecs.push(entry);
             }
             self.pak_files = vecs;
+            if let Some(idx) = self.current_pak_file_idx {
+                if let Some(entry) = self.pak_files.get(idx) {
+                    self.table = Some(FileTable::new(&entry.reader, &entry.path));
+                } else {
+                    self.current_pak_file_idx = None;
+                    self.table = None;
+                }
+            } else {
+                self.table = None;
+            }
             info!(mod_entries = self.pak_files.len(), "Loaded mod entries");
         }
+    }
+
+    #[instrument(skip(self), fields(game_path = ?self.game_path))]
+    fn restart_game_path_watcher(&mut self) {
+        self.watcher = None;
+        let Some(tx) = self.watcher_tx.clone() else {
+            warn!("Watcher sender was not initialized; skipping watcher setup");
+            return;
+        };
+
+        let mut watcher: RecommendedWatcher = match notify::recommended_watcher(move |res| {
+            if let Ok(event) = res {
+                let _ = tx.send(event);
+            }
+        }) {
+            Ok(watcher) => watcher,
+            Err(e) => {
+                warn!(error = %e, "Failed to create filesystem watcher");
+                return;
+            }
+        };
+
+        if self.game_path.exists() {
+            if let Err(e) = watcher.watch(&self.game_path, RecursiveMode::Recursive) {
+                warn!(error = %e, path = %self.game_path.to_string_lossy(), "Failed to watch game path");
+                return;
+            }
+            info!(path = %self.game_path.to_string_lossy(), "Watching game path for changes");
+        } else {
+            warn!(path = %self.game_path.to_string_lossy(), "Game path does not exist; watcher not started");
+        }
+
+        self.watcher = Some(watcher);
     }
     fn list_pak_contents(&mut self, ui: &mut egui::Ui) -> Result<(), repak::Error> {
         ui.label("Files");
@@ -500,6 +546,7 @@ impl RepakModManager {
             config.hide_welcome = !show_welcome;
             config.welcome_screen = Some(ShowWelcome {});
             config.receiver = Some(rx);
+            config.watcher_tx = Some(tx.clone());
 
             Ok(config)
         } else {
@@ -511,28 +558,12 @@ impl RepakModManager {
             x.welcome_screen = Some(ShowWelcome {});
             x.hide_welcome = false;
             x.receiver = Some(rx);
+            x.watcher_tx = Some(tx.clone());
             Ok(x)
         };
 
         if let Ok(ref mut shit) = shit {
-            let path = shit.game_path.clone();
-            thread::spawn(move || {
-                let mut watcher: RecommendedWatcher = notify::recommended_watcher(move |res| {
-                    if let Ok(event) = res {
-                        tx.send(event).unwrap();
-                    }
-                })
-                .unwrap();
-
-                if path.exists() {
-                    watcher.watch(&path, RecursiveMode::Recursive).unwrap();
-                }
-
-                // Keep the thread alive
-                loop {
-                    thread::sleep(Duration::from_secs(1));
-                }
-            });
+            shit.restart_game_path_watcher();
             shit.collect_pak_files();
             if persist_config {
                 if let Err(e) = shit.save_state() {
@@ -723,7 +754,17 @@ impl RepakModManager {
                 let browse_button = flex_ui.add(item(), Button::new("Browse"));
                 if browse_button.clicked() {
                     if let Some(path) = FileDialog::new().pick_folder() {
-                        self.game_path = path;
+                        self.game_path = path.clean();
+                        if let Err(e) = fs::create_dir_all(&self.game_path) {
+                            warn!(error = %e, path = %self.game_path.to_string_lossy(), "Failed to create selected mod directory");
+                        }
+                        self.current_pak_file_idx = None;
+                        self.table = None;
+                        self.collect_pak_files();
+                        self.restart_game_path_watcher();
+                        if let Err(e) = self.save_state() {
+                            warn!(error = %e, "Failed to save selected mod path");
+                        }
                     }
                 }
                 flex_ui.add_ui(item(), |ui| {
