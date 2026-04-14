@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["repak", "repak-gui", "repak_cli","simd_str_cmp"]
+members = ["repak", "repak-gui", "repak_cli", "repak-cli2", "simd_str_cmp", "unreal-packaging-backend"]
 
 [workspace.package]
 repository = "https://github.com/natimerry/repak-rivals"
