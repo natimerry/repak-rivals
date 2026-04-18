@@ -57,7 +57,9 @@ pub fn convert_directory_to_iostore(
         to_pak_dir.clone(),
         mod_dir.join(utoc_name),
         EngineVersion::UE5_3,
-    );
+    )
+    .with_obfuscation(pak.obfuscated);
+
     let mut config = Config {
         container_header_version_override: None,
         ..Default::default()

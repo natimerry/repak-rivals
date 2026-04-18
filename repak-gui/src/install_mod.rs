@@ -43,12 +43,14 @@ pub struct InstallableMod {
     // the only reason we keep this is to filter out the archives during collection
     pub is_archived: bool,
     pub enabled: bool,
+    pub obfuscated: bool,
     // pub audio_mod: bool,
 }
 
 impl Default for InstallableMod {
     fn default() -> Self {
-        InstallableMod{
+        InstallableMod {
+            obfuscated: false,
             mod_name: "".to_string(),
             mod_type: "".to_string(),
             repak: false,
@@ -243,8 +245,8 @@ impl ModInstallRequest {
             .body(|mut body| {
                 for (rowidx, mods) in self.mods.iter_mut().enumerate() {
                     body.row(20., |mut row| {
-                        row.col(|ui|{
-                            ui.add(Checkbox::new(&mut mods.enabled,""));
+                        row.col(|ui| {
+                            ui.add(Checkbox::new(&mut mods.enabled, ""));
                         });
 
                         row.col(|ui| {
@@ -285,13 +287,11 @@ impl ModInstallRequest {
                             ui.label(&mods.mod_type);
                         });
                         row.col(|ui| {
-                            let label = if mods.is_dir{
+                            let label = if mods.is_dir {
                                 "Directory"
-                            }
-                            else if mods.iostore {
+                            } else if mods.iostore {
                                 "Iostore"
-                            }
-                            else {
+                            } else {
                                 "Pakfile"
                             };
                             ui.label(label);
@@ -305,6 +305,11 @@ impl ModInstallRequest {
                                 ui.add_enabled(
                                     mods.is_dir || mods.repak,
                                     Checkbox::new(&mut mods.fix_mesh, "Fix mesh"),
+                                );
+
+                                ui.add_enabled(
+                                    mods.is_dir || mods.repak,
+                                    Checkbox::new(&mut mods.obfuscated, "Obfuscate"),
                                 );
 
                                 let text_edit = TextEdit::singleline(&mut mods.mount_point);
@@ -373,13 +378,11 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                 let mut modtype = String::from("Unknown");
                 let mut iostore = false;
 
-
                 let pak_path = path.with_extension("pak");
                 let utoc_path = path.with_extension("utoc");
                 let ucas_path = path.with_extension("ucas");
 
-                if pak_path.exists() && utoc_path.exists() && ucas_path.exists()
-                {
+                if pak_path.exists() && utoc_path.exists() && ucas_path.exists() {
                     // this is a mod of type s2, create a new Installable mod from its characteristics
                     let utoc_path = path.with_extension("utoc");
 
@@ -393,7 +396,7 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                     iostore = true;
                 }
                 // IF ONLY PAK IS FOUND WE NEED TO EXTRACT AND INSTALL THE PAK
-                else if pak_path.exists()  {
+                else if pak_path.exists() {
                     let files = builder.files();
                     len = files.len();
                     modtype = get_current_pak_characteristics(files);
