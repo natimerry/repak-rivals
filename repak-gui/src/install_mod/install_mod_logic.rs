@@ -43,24 +43,40 @@ pub fn install_mods_in_viewport(
         installable_mod.mod_name = normalized_mod_name.clone();
 
         if installable_mod.iostore {
-            info!(mod_name = %installable_mod.mod_name, mod_path = ?installable_mod.mod_path, "Copying iostore mod");
-            // copy the iostore files
-            let pak_path = installable_mod.mod_path.with_extension("pak");
-            let utoc_path = installable_mod.mod_path.with_extension("utoc");
-            let ucas_path = installable_mod.mod_path.with_extension("ucas");
 
-            let files_to_copy = vec![
-                (pak_path, format!("{normalized_mod_name}.pak")),
-                (utoc_path, format!("{normalized_mod_name}.utoc")),
-                (ucas_path, format!("{normalized_mod_name}.ucas")),
-            ];
+            /// THIS IS CURRENTLY BROKEN AS RETOC ISNT PROVIDED GAME GLOBAL CHUNKDATA FILE
+            /// WHEN THE UI IS UPDATED WE WILL ADD THIS CAPABILITY
 
-            for (file, target_name) in files_to_copy {
-                if let Err(e) = std::fs::copy(&file, mod_directory.join(target_name)) {
-                    error!(?file, error = ?e, "Unable to copy file");
+            // if installable_mod.repak {
+            //     info!(mod_name = %installable_mod.mod_name, mod_path = ?installable_mod.mod_path, "Repacking IoStore mod with current settings");
+            //     // unpack to temp dir, then convert_directory_to_iostore
+            //     if let Err(e) = repack_iostore_mod(
+            //         installable_mod,
+            //         PathBuf::from(mod_directory),
+            //         installed_mods_ptr,
+            //     ) {
+            //         error!(mod_name = %installable_mod.mod_name, error = %e, "Failed to repack IoStore mod");
+            //     }
+            // } else {
+                info!(mod_name = %installable_mod.mod_name, mod_path = ?installable_mod.mod_path, "Copying iostore mod");
+                // copy the iostore files
+                let pak_path = installable_mod.mod_path.with_extension("pak");
+                let utoc_path = installable_mod.mod_path.with_extension("utoc");
+                let ucas_path = installable_mod.mod_path.with_extension("ucas");
+
+                let files_to_copy = vec![
+                    (pak_path, format!("{normalized_mod_name}.pak")),
+                    (utoc_path, format!("{normalized_mod_name}.utoc")),
+                    (ucas_path, format!("{normalized_mod_name}.ucas")),
+                ];
+
+                for (file, target_name) in files_to_copy {
+                    if let Err(e) = std::fs::copy(&file, mod_directory.join(target_name)) {
+                        error!(?file, error = ?e, "Unable to copy file");
+                    }
                 }
-            }
-            continue;
+                continue;
+            // }
         }
 
         if installable_mod.repak {

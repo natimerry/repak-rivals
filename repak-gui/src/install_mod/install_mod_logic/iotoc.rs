@@ -10,7 +10,7 @@ use repak::Version;
 use retoc::*;
 use std::fs::File;
 use std::io::BufWriter;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::AtomicI32;
 use std::sync::Arc;
@@ -115,4 +115,50 @@ pub fn convert_directory_to_iostore(
     Ok(())
 
     // now generate the fake pak file
+}
+
+pub fn repack_iostore_mod(
+    pak: &InstallableMod,
+    mod_dir: PathBuf,
+    game_paks_dir: &Path, // e.g. "C:\...\Marvel\Content\Paks"
+    packed_files_count: &AtomicI32,
+) -> Result<(), repak::Error> {
+    let temp_dir = tempfile::tempdir().map_err(repak::Error::Io)?;
+    let temp_path = temp_dir.path().to_path_buf();
+
+    let mut config = retoc::Config {
+        container_header_version_override: None,
+        ..Default::default()
+    };
+    let aes_toc =
+        retoc::AesKey::from_str("0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74")
+            .unwrap();
+    config.aes_keys.insert(retoc::FGuid::default(), aes_toc);
+    let config = Arc::new(config);
+
+    retoc::action_to_legacy(
+        ActionToLegacy {
+            input: game_paks_dir.to_path_buf(), // <-- paks dir, not mod utoc
+            output: temp_path.clone(),
+            filter: vec![pak
+                .mod_path
+                .file_stem()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string()], // filter to only this mod's assets
+            no_assets: false,
+            no_shaders: true,
+            no_compres_shaders: true,
+            dry_run: false,
+            version: None,
+            verbose: false,
+            debug: false,
+            no_parallel: false,
+        },
+        config,
+    )
+    .map_err(|e| repak::Error::Io(std::io::Error::other(e.to_string())))?;
+
+    convert_directory_to_iostore(pak, mod_dir, temp_path, packed_files_count)
 }
