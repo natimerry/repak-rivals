@@ -3,8 +3,8 @@ pub mod iotoc;
 pub mod pak_files;
 pub mod patch_meshes;
 
-use crate::install_mod::InstallableMod;
 use crate::install_mod::install_mod_logic::iotoc::repack_iostore_mod;
+use crate::install_mod::InstallableMod;
 use iotoc::convert_directory_to_iostore;
 use pak_files::create_repak_from_pak;
 use std::path::{Path, PathBuf};
@@ -27,7 +27,7 @@ pub fn install_mods_in_viewport(
     mod_directory: &Path,
     installed_mods_ptr: &AtomicI32,
     stop_thread: &AtomicBool,
-    chunkdir: &Option<PathBuf>
+    chunkdir: &Option<PathBuf>,
 ) {
     info!("Installing queued mods");
     for installable_mod in mods.iter_mut() {
@@ -45,7 +45,6 @@ pub fn install_mods_in_viewport(
         installable_mod.mod_name = normalized_mod_name.clone();
 
         if installable_mod.iostore {
-
             // THIS IS CURRENTLY BROKEN AS RETOC ISNT PROVIDED GAME GLOBAL CHUNKDATA FILE
             // WHEN THE UI IS UPDATED WE WILL ADD THIS CAPABILITY
 
@@ -61,6 +60,7 @@ pub fn install_mods_in_viewport(
                 ) {
                     error!(mod_name = %installable_mod.mod_name, error = %e, "Failed to repack IoStore mod");
                 }
+                continue;
             } else {
                 info!(mod_name = %installable_mod.mod_name, mod_path = ?installable_mod.mod_path, "Copying iostore mod");
                 // copy the iostore files

@@ -7,13 +7,13 @@ use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::ParallelIterator;
 use repak::Version;
 use retoc::*;
-use tracing::{debug, info};
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::AtomicI32;
 use std::sync::Arc;
+use tracing::{debug, info, instrument};
 
 const MOD_NAME_SUFFIX: &str = "_9999999_P";
 
@@ -117,6 +117,7 @@ pub fn convert_directory_to_iostore(
     // now generate the fake pak file
 }
 
+#[instrument(skip_all)]
 pub fn repack_iostore_mod(
     pak: &InstallableMod,
     mod_dir: PathBuf,
@@ -151,45 +152,36 @@ pub fn repack_iostore_mod(
     config.aes_keys.insert(retoc::FGuid::default(), aes_toc);
     let config = Arc::new(config);
 
+    use std::collections::HashSet;
+
     let filter: Vec<String> = action_manifest(action_mn, config.clone())
         .map(|ops| {
-            let stems: Vec<String> = ops.oplog.entries.iter()
-                .filter_map(|entry| {
-                    std::path::Path::new(&entry.packagestoreentry.packagename)
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .map(|s| s.to_string())
-                })
-                .collect();
-            if stems.is_empty() {
-                return vec![];
-            }
-            let first = &stems[0];
-            let common_len = stems.iter().fold(first.len(), |acc, s| {
-                acc.min(first.chars().zip(s.chars()).take_while(|(a, b)| a == b).count())
+            let mut set = HashSet::new();
+
+            ops.oplog.entries.iter().for_each(|entry| {
+                if let Some(stem) = std::path::Path::new(&entry.packagestoreentry.packagename)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                {
+                    set.insert(stem.to_string());
+                }
             });
-            let prefix = &first[..common_len];
-            let trimmed = match prefix.rfind('_') {
-                Some(i) => &prefix[..i],
-                None => prefix,
-            };
-            if trimmed.len() > 4 {
-                vec![trimmed.to_string()]
-            } else {
-                stems
-            }
+
+            set.into_iter().collect()
         })
         .unwrap_or_default();
 
-    let legacy_pak_path = temp_path.join("legacy.pak");
-    let legacy_pak_path_clone = legacy_pak_path.clone();
-    let game_paks_dir_clone = game_paks_dir.clone();
+    let legacy_output_dir = temp_path.join(mod_stem);
+    std::fs::create_dir_all(&legacy_output_dir).map_err(repak::Error::Io)?;
+
+    let games_pak_dir_clone = game_paks_dir.clone();
+    let legacy_output_dir_clone = legacy_output_dir.clone();
 
     let result = std::thread::spawn(move || {
         retoc::action_to_legacy(
             ActionToLegacy {
-                input: game_paks_dir_clone,
-                output: legacy_pak_path_clone,
+                input: games_pak_dir_clone,
+                output: legacy_output_dir_clone, // directory, not .pak
                 filter,
                 no_assets: false,
                 no_shaders: true,
@@ -207,21 +199,14 @@ pub fn repack_iostore_mod(
     .unwrap()
     .map_err(|e| repak::Error::Io(std::io::Error::other(e.to_string())));
 
-    // Always clean up copied mod files from paks dir
     for dst in copied_files {
         let _ = std::fs::remove_file(dst);
     }
 
     result?;
-    
-    // Unpack the generated legacy pak
-    let legacy_output_dir = temp_path.join("legacy");
-    std::fs::create_dir_all(&legacy_output_dir).map_err(repak::Error::Io)?;
-    for entry in walkdir::WalkDir::new(&legacy_output_dir) {
-        let entry = entry.unwrap();
-        if entry.file_type().is_file() {
-            info!("  {:?}", entry.path());
-        }
-    }
+    info!(
+        "Installing mod from {:#?} into {:#?}",
+        &legacy_output_dir, &mod_dir
+    );
     convert_directory_to_iostore(pak, mod_dir, legacy_output_dir, packed_files_count)
 }
