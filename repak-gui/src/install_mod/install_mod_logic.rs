@@ -3,7 +3,6 @@ pub mod iotoc;
 pub mod pak_files;
 pub mod patch_meshes;
 
-use crate::install_mod::install_mod_logic::iotoc::repack_iostore_mod;
 use crate::install_mod::InstallableMod;
 use iotoc::convert_directory_to_iostore;
 use pak_files::create_repak_from_pak;
@@ -48,39 +47,39 @@ pub fn install_mods_in_viewport(
             // THIS IS CURRENTLY BROKEN AS RETOC ISNT PROVIDED GAME GLOBAL CHUNKDATA FILE
             // WHEN THE UI IS UPDATED WE WILL ADD THIS CAPABILITY
 
-            if installable_mod.repak && chunkdir.is_some() {
-                let chunkdir = chunkdir.clone().unwrap();
-                info!(mod_name = %installable_mod.mod_name, mod_path = ?installable_mod.mod_path, chunkdir = ?chunkdir, "Repacking IoStore mod with current settings");
-                // unpack to temp dir, then convert_directory_to_iostore
-                if let Err(e) = repack_iostore_mod(
-                    installable_mod,
-                    PathBuf::from(mod_directory),
-                    chunkdir.into(),
-                    installed_mods_ptr,
-                ) {
-                    error!(mod_name = %installable_mod.mod_name, error = %e, "Failed to repack IoStore mod");
-                }
-                continue;
-            } else {
-                info!(mod_name = %installable_mod.mod_name, mod_path = ?installable_mod.mod_path, "Copying iostore mod");
-                // copy the iostore files
-                let pak_path = installable_mod.mod_path.with_extension("pak");
-                let utoc_path = installable_mod.mod_path.with_extension("utoc");
-                let ucas_path = installable_mod.mod_path.with_extension("ucas");
+            // if installable_mod.repak && chunkdir.is_some() {
+            //     let chunkdir = chunkdir.clone().unwrap();
+            //     info!(mod_name = %installable_mod.mod_name, mod_path = ?installable_mod.mod_path, chunkdir = ?chunkdir, "Repacking IoStore mod with current settings");
+            //     // unpack to temp dir, then convert_directory_to_iostore
+            //     if let Err(e) = repack_iostore_mod(
+            //         installable_mod,
+            //         PathBuf::from(mod_directory),
+            //         chunkdir.into(),
+            //         installed_mods_ptr,
+            //     ) {
+            //         error!(mod_name = %installable_mod.mod_name, error = %e, "Failed to repack IoStore mod");
+            //     }
+            //     continue;
+            // } else {
+            info!(mod_name = %installable_mod.mod_name, mod_path = ?installable_mod.mod_path, "Copying iostore mod");
+            // copy the iostore files
+            let pak_path = installable_mod.mod_path.with_extension("pak");
+            let utoc_path = installable_mod.mod_path.with_extension("utoc");
+            let ucas_path = installable_mod.mod_path.with_extension("ucas");
 
-                let files_to_copy = vec![
-                    (pak_path, format!("{normalized_mod_name}.pak")),
-                    (utoc_path, format!("{normalized_mod_name}.utoc")),
-                    (ucas_path, format!("{normalized_mod_name}.ucas")),
-                ];
+            let files_to_copy = vec![
+                (pak_path, format!("{normalized_mod_name}.pak")),
+                (utoc_path, format!("{normalized_mod_name}.utoc")),
+                (ucas_path, format!("{normalized_mod_name}.ucas")),
+            ];
 
-                for (file, target_name) in files_to_copy {
-                    if let Err(e) = std::fs::copy(&file, mod_directory.join(target_name)) {
-                        error!(?file, error = ?e, "Unable to copy file");
-                    }
+            for (file, target_name) in files_to_copy {
+                if let Err(e) = std::fs::copy(&file, mod_directory.join(target_name)) {
+                    error!(?file, error = ?e, "Unable to copy file");
                 }
-                continue;
             }
+            continue;
+            // }
         }
 
         if installable_mod.repak {

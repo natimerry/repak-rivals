@@ -1,14 +1,15 @@
 extern crate core;
 
 use crate::file_table::FileTable;
+use crate::install_mod::install_mod_logic::iotoc::to_legacy_uasset;
 use crate::install_mod::{
     self, map_dropped_file_to_mods, map_paths_to_mods, InstallableMod, ModInstallRequest, AES_KEY,
 };
-use crate::ios_widget;
 use crate::utils::find_marvel_rivals;
 use crate::utils::get_current_pak_characteristics;
 use crate::utoc_utils::read_utoc;
 use crate::welcome::ShowWelcome;
+use crate::{free_console, ios_widget};
 use eframe::egui::{
     self, style::Selection, Align, Align2, Button, Color32, Id, Label, LayerId, Order, RichText,
     ScrollArea, Stroke, Style, TextEdit, TextStyle, Theme,
@@ -21,12 +22,13 @@ use repak::PakReader;
 use retoc::ActionUnpack;
 use rfd::{FileDialog, MessageButtons};
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::atomic::AtomicI32;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::fs;
 use tracing::{debug, error, info, instrument, trace, warn};
 use walkdir::WalkDir;
 
@@ -62,7 +64,7 @@ pub struct RepakModManager {
     #[serde(skip)]
     mod_files_search_query: String,
     version: Option<String>,
-    
+
     game_chunk_path: Option<PathBuf>,
 }
 
@@ -115,13 +117,7 @@ fn set_custom_font_size(ctx: &egui::Context, size: f32) {
     ctx.set_style(style);
 }
 fn match_exact_paks_suffix(path: &Path) -> Option<PathBuf> {
-    let target = [
-        "MarvelRivals",
-        "MarvelGame",
-        "Marvel",
-        "Content",
-        "Paks",
-    ];
+    let target = ["MarvelRivals", "MarvelGame", "Marvel", "Content", "Paks"];
 
     let components: Vec<_> = path
         .components()
@@ -181,16 +177,15 @@ impl RepakModManager {
         set_custom_font_size(&cc.egui_ctx, x.default_font_size);
         x
     }
-    
-    fn set_game_pakchunk_path(&mut self)
-    {
+
+    fn set_game_pakchunk_path(&mut self) {
         let path = &self.game_path.parent().unwrap();
 
         if let Some(paks_path) = match_exact_paks_suffix(path) {
             self.game_chunk_path = Some(paks_path)
         }
     }
-    
+
     #[instrument(skip(self), fields(game_path = ?self.game_path))]
     fn collect_pak_files(&mut self) {
         debug!("Refreshing mods");
@@ -449,6 +444,10 @@ impl RepakModManager {
                                         Some(FileTable::new(&pak_file.reader, &pak_file.path));
                                 }
 
+                                let mut utoc_path = pak_file.path.clone();
+                                utoc_path.set_extension("utoc");
+
+                                let is_iostore = utoc_path.exists();
                                 pakfile.context_menu(|ui| {
                                     if ui.button("Extract pak to directory").clicked(){
                                         info!(mod_path = ?pak_file.path, "Preparing extraction");
@@ -500,6 +499,27 @@ impl RepakModManager {
                                             }
                                         }
                                     }
+                                    if is_iostore && self.game_chunk_path.is_some(){
+                                        if ui.button("To legacy asset").clicked()
+                                        {
+
+                                            let dir = rfd::FileDialog::new().pick_folder();
+                                            if let Some(dir) = dir
+                                            {
+                                                #[cfg(windows)]
+                                                {
+                                                    crate::ensure_console();
+                                                    crate::redirect_stdio();
+                                                }
+
+                                                to_legacy_uasset(pak_file.path.clone(), dir, self.game_chunk_path.clone().unwrap(), &AtomicI32::new(0)).unwrap();
+                                                #[cfg(windows)]
+                                                free_console();
+
+                                            }
+
+                                        }
+                                    }
                                     if ui.button("Delete mod").clicked(){
                                         let pak_path = pak_file.path.clone();
                                         if Self::delete_mod_files(&pak_path).is_err() {
@@ -507,6 +527,7 @@ impl RepakModManager {
                                         }
                                         self.current_pak_file_idx = None;
                                     }
+
                                 });
                             });
 
@@ -733,8 +754,11 @@ impl RepakModManager {
 
                     info!(selected_mods = mods.len(), "Prepared mods from file picker");
                     self.file_drop_viewport_open = true;
-                    self.install_mod_dialog =
-                        Some(ModInstallRequest::new(mods, self.game_path.clone(),&self.game_chunk_path));
+                    self.install_mod_dialog = Some(ModInstallRequest::new(
+                        mods,
+                        self.game_path.clone(),
+                        &self.game_chunk_path,
+                    ));
                 }
 
                 if ui
@@ -763,8 +787,11 @@ impl RepakModManager {
                         "Prepared mods from directory picker"
                     );
                     self.file_drop_viewport_open = true;
-                    self.install_mod_dialog =
-                        Some(ModInstallRequest::new(mods, self.game_path.clone(),&self.game_chunk_path));
+                    self.install_mod_dialog = Some(ModInstallRequest::new(
+                        mods,
+                        self.game_path.clone(),
+                        &self.game_chunk_path,
+                    ));
                 }
                 if ui.button("Quit").clicked() {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);

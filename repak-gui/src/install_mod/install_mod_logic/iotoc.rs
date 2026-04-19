@@ -118,20 +118,20 @@ pub fn convert_directory_to_iostore(
 }
 
 #[instrument(skip_all)]
-pub fn repack_iostore_mod(
-    pak: &InstallableMod,
-    mod_dir: PathBuf,
+pub fn to_legacy_uasset(
+    pak: PathBuf,
+    output_dir: PathBuf,
     game_paks_dir: PathBuf,
     packed_files_count: &AtomicI32,
 ) -> Result<(), repak::Error> {
     let temp_dir = tempfile::tempdir().map_err(repak::Error::Io)?;
     let temp_path = temp_dir.path().to_path_buf();
-    let mod_stem = pak.mod_path.file_stem().unwrap().to_str().unwrap();
+    let mod_stem = pak.file_stem().unwrap().to_str().unwrap();
 
     // Copy mod files into the paks dir
     let mut copied_files = vec![];
     for ext in &["pak", "utoc", "ucas"] {
-        let src = pak.mod_path.with_extension(ext);
+        let src = pak.with_extension(ext);
         let dst = game_paks_dir.join(format!("{}.{}", mod_stem, ext));
         if src.exists() {
             std::fs::copy(&src, &dst).map_err(repak::Error::Io)?;
@@ -140,7 +140,7 @@ pub fn repack_iostore_mod(
     }
 
     // Build filter list
-    let utoc_path = pak.mod_path.with_extension("utoc");
+    let utoc_path = pak.with_extension("utoc");
     let action_mn = ActionManifest::new(utoc_path.clone());
     let mut config = retoc::Config {
         container_header_version_override: None,
@@ -184,7 +184,7 @@ pub fn repack_iostore_mod(
                 output: legacy_output_dir_clone, // directory, not .pak
                 filter,
                 no_assets: false,
-                no_shaders: true,
+                no_shaders: false,
                 no_compres_shaders: true,
                 dry_run: false,
                 version: None,
@@ -206,7 +206,7 @@ pub fn repack_iostore_mod(
     result?;
     info!(
         "Installing mod from {:#?} into {:#?}",
-        &legacy_output_dir, &mod_dir
+        &legacy_output_dir, &output_dir
     );
-    convert_directory_to_iostore(pak, mod_dir, legacy_output_dir, packed_files_count)
+    return Ok(());
 }

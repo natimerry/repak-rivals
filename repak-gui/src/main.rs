@@ -50,6 +50,79 @@ const ICON: LazyCell<Arc<IconData>> = LazyCell::new(|| {
 fn free_console() -> bool {
     unsafe { FreeConsole() == 0 }
 }
+
+#[cfg(windows)]
+pub mod win_console {
+    #[link(name = "kernel32")]
+    extern "system" {
+        pub fn AllocConsole() -> i32;
+        pub fn AttachConsole(dwProcessId: u32) -> i32;
+        pub fn SetStdHandle(nStdHandle: u32, hHandle: *mut core::ffi::c_void) -> i32;
+        pub fn GetStdHandle(nStdHandle: u32) -> *mut core::ffi::c_void;
+        pub fn CreateFileA(
+            lpFileName: *const u8,
+            dwDesiredAccess: u32,
+            dwShareMode: u32,
+            lpSecurityAttributes: *mut core::ffi::c_void,
+            dwCreationDisposition: u32,
+            dwFlagsAndAttributes: u32,
+            hTemplateFile: *mut core::ffi::c_void,
+        ) -> *mut core::ffi::c_void;
+    }
+
+    pub const ATTACH_PARENT_PROCESS: u32 = 0xFFFF_FFFF;
+
+    pub const STD_OUTPUT_HANDLE: u32 = -11i32 as u32;
+    pub const STD_ERROR_HANDLE: u32 = -12i32 as u32;
+
+    pub const FILE_GENERIC_WRITE: u32 = 0x40000000;
+    pub const FILE_SHARE_READ: u32 = 0x00000001;
+    pub const FILE_SHARE_WRITE: u32 = 0x00000002;
+
+    pub const OPEN_EXISTING: u32 = 3;
+}
+
+#[cfg(windows)]
+pub fn ensure_console() {
+    use win_console::*;
+    unsafe {
+        // Try attaching first
+        if AttachConsole(ATTACH_PARENT_PROCESS) == 0 {
+            // If that fails, allocate new console
+            AllocConsole();
+        }
+    }
+}
+
+#[cfg(windows)]
+pub fn redirect_stdio() {
+    use std::ptr;
+    use win_console::*;
+
+    unsafe {
+        let name = b"CONOUT$\0";
+
+        let handle = CreateFileA(
+            name.as_ptr(),
+            FILE_GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            ptr::null_mut(),
+            OPEN_EXISTING,
+            0,
+            ptr::null_mut(),
+        );
+
+        if !handle.is_null() {
+            SetStdHandle(STD_OUTPUT_HANDLE, handle);
+            SetStdHandle(STD_ERROR_HANDLE, handle);
+        }
+
+        // Force Rust stdio to rebind
+        let _ = std::io::stdout();
+        let _ = std::io::stderr();
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn is_console() -> bool {
     unsafe {
@@ -476,7 +549,9 @@ fn main() {
         Box::new(|cc| {
             cc.egui_ctx
                 .style_mut(|style| style.visuals.dark_mode = true);
-            Ok(Box::new(RepakModManager::load(cc, path_reset).expect("Unable to load config")))
+            Ok(Box::new(
+                RepakModManager::load(cc, path_reset).expect("Unable to load config"),
+            ))
         }),
     )
     .expect("Unable to spawn windows");

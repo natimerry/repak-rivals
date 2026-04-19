@@ -79,11 +79,15 @@ pub struct ModInstallRequest {
     pub installed_mods_cbk: Arc<AtomicI32>,
     pub joined_thread: Option<thread::JoinHandle<()>>,
     pub stop_thread: Arc<AtomicBool>,
-    pub chunkdir: Option<PathBuf>
+    pub chunkdir: Option<PathBuf>,
 }
 impl ModInstallRequest {
     #[instrument(skip(mods), fields(mod_count = mods.len(), mod_directory = ?mod_directory))]
-    pub fn new(mods: Vec<InstallableMod>, mod_directory: PathBuf,chunkdir: &Option<PathBuf>) -> Self {
+    pub fn new(
+        mods: Vec<InstallableMod>,
+        mod_directory: PathBuf,
+        chunkdir: &Option<PathBuf>,
+    ) -> Self {
         let len = mods.iter().map(|m| m.total_files).sum::<usize>();
         info!("Created install request");
         let chunkdir = chunkdir.clone();
