@@ -1,15 +1,18 @@
 extern crate core;
 
 use crate::file_table::FileTable;
+#[cfg(windows)]
+use crate::free_console;
 use crate::install_mod::install_mod_logic::iotoc::to_legacy_uasset;
 use crate::install_mod::{
     self, map_dropped_file_to_mods, map_paths_to_mods, InstallableMod, ModInstallRequest, AES_KEY,
 };
+use crate::ios_widget;
 use crate::utils::find_marvel_rivals;
 use crate::utils::get_current_pak_characteristics;
 use crate::utoc_utils::read_utoc;
 use crate::welcome::ShowWelcome;
-use crate::{free_console, ios_widget};
+
 use eframe::egui::{
     self, style::Selection, Align, Align2, Button, Color32, Id, Label, LayerId, Order, RichText,
     ScrollArea, Stroke, Style, TextEdit, TextStyle, Theme,
