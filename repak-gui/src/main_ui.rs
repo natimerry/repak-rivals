@@ -23,7 +23,7 @@ use rfd::{FileDialog, MessageButtons};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::BufReader;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::fs;
@@ -62,6 +62,8 @@ pub struct RepakModManager {
     #[serde(skip)]
     mod_files_search_query: String,
     version: Option<String>,
+    
+    game_chunk_path: Option<PathBuf>,
 }
 
 #[derive(Clone)]
@@ -112,6 +114,48 @@ fn set_custom_font_size(ctx: &egui::Context, size: f32) {
     }
     ctx.set_style(style);
 }
+fn match_exact_paks_suffix(path: &Path) -> Option<PathBuf> {
+    let target = [
+        "MarvelRivals",
+        "MarvelGame",
+        "Marvel",
+        "Content",
+        "Paks",
+    ];
+
+    let components: Vec<_> = path
+        .components()
+        .filter_map(|c| c.as_os_str().to_str())
+        .collect();
+
+    // find FIRST "MarvelRivals"
+    let start = components.iter().position(|c| *c == "MarvelRivals")?;
+
+    // ensure remaining components match exactly
+    let remaining = &components[start..];
+
+    if remaining.len() < target.len() {
+        return None;
+    }
+
+    if remaining[..target.len()] != target {
+        return None;
+    }
+
+    // optional: enforce that path ends exactly at "Paks"
+    // (i.e. no extra segments after)
+    if remaining.len() != target.len() {
+        return None;
+    }
+
+    // reconstruct full valid path up to Paks
+    let mut result = PathBuf::new();
+    for c in &components[..start + target.len()] {
+        result.push(c);
+    }
+
+    Some(result)
+}
 
 impl RepakModManager {
     #[instrument(skip(cc))]
@@ -124,7 +168,7 @@ impl RepakModManager {
             fs::create_dir_all(&game_path).unwrap();
         }
         setup_custom_style(&cc.egui_ctx);
-        let x = Self {
+        let mut x = Self {
             game_path,
             default_font_size: 18.0,
             pak_files: vec![],
@@ -133,10 +177,20 @@ impl RepakModManager {
             version: Some(VERSION.to_string()),
             ..Default::default()
         };
+        x.set_game_pakchunk_path();
         set_custom_font_size(&cc.egui_ctx, x.default_font_size);
         x
     }
+    
+    fn set_game_pakchunk_path(&mut self)
+    {
+        let path = &self.game_path.parent().unwrap();
 
+        if let Some(paks_path) = match_exact_paks_suffix(path) {
+            self.game_chunk_path = Some(paks_path)
+        }
+    }
+    
     #[instrument(skip(self), fields(game_path = ?self.game_path))]
     fn collect_pak_files(&mut self) {
         debug!("Refreshing mods");
@@ -533,7 +587,7 @@ impl RepakModManager {
 
             info!("Loading mods: {}", config.game_path.to_string_lossy());
             config.collect_pak_files();
-
+            config.set_game_pakchunk_path();
             let mut show_welcome = false;
             if let Some(ref version) = config.version {
                 if version != VERSION {

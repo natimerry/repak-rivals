@@ -129,8 +129,11 @@ fn get_steam_library_paths() -> Vec<PathBuf> {
     let vdf_path = PathBuf::from("C:/Program Files (x86)/Steam/steamapps/libraryfolders.vdf");
 
     #[cfg(target_os = "linux")]
-    let vdf_path = PathBuf::from("~/.steam/steam/steamapps/libraryfolders.vdf");
-
+    let vdf_path = {
+        let home = dirs::home_dir().unwrap();
+        let path = home.join(".steam/steam/steamapps/libraryfolders.vdf");
+        path
+    };
     if !vdf_path.exists() {
         debug!(?vdf_path, "Steam library manifest not found");
         return vec![];
