@@ -79,12 +79,14 @@ pub struct ModInstallRequest {
     pub installed_mods_cbk: Arc<AtomicI32>,
     pub joined_thread: Option<thread::JoinHandle<()>>,
     pub stop_thread: Arc<AtomicBool>,
+    pub chunkdir: Option<PathBuf>
 }
 impl ModInstallRequest {
     #[instrument(skip(mods), fields(mod_count = mods.len(), mod_directory = ?mod_directory))]
-    pub fn new(mods: Vec<InstallableMod>, mod_directory: PathBuf) -> Self {
+    pub fn new(mods: Vec<InstallableMod>, mod_directory: PathBuf,chunkdir: &Option<PathBuf>) -> Self {
         let len = mods.iter().map(|m| m.total_files).sum::<usize>();
         info!("Created install request");
+        let chunkdir = chunkdir.clone();
         Self {
             animate: false,
             mods,
@@ -93,6 +95,7 @@ impl ModInstallRequest {
             installed_mods_cbk: Arc::new(AtomicI32::new(0)),
             joined_thread: None,
             stop_thread: Arc::new(AtomicBool::new(false)),
+            chunkdir,
         }
     }
 }
@@ -159,12 +162,14 @@ impl ModInstallRequest {
                                     let dir = self.mod_directory.clone();
                                     let new_atomic = self.installed_mods_cbk.clone();
                                     let new_stop_thread = self.stop_thread.clone();
+                                    let chunkdir = self.chunkdir.clone();
                                     self.joined_thread = Some(std::thread::spawn(move || {
                                         install_mods_in_viewport(
                                             &mut mods,
                                             &dir,
                                             &new_atomic,
                                             &new_stop_thread,
+                                            &chunkdir,
                                         );
                                     }));
                                     self.animate = true;

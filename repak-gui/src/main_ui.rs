@@ -688,7 +688,7 @@ impl RepakModManager {
                     self.file_drop_viewport_open = true;
                     debug!(installable_mods = mods.len(), "Prepared installable mods from dropped items");
                     self.install_mod_dialog =
-                        Some(ModInstallRequest::new(mods, self.game_path.clone()));
+                        Some(ModInstallRequest::new(mods, self.game_path.clone(),&self.game_chunk_path));
 
                     if let Some(dialog) = &self.install_mod_dialog {
                         trace!("Install dialog payload: {:#?}", dialog.mods);
@@ -734,7 +734,7 @@ impl RepakModManager {
                     info!(selected_mods = mods.len(), "Prepared mods from file picker");
                     self.file_drop_viewport_open = true;
                     self.install_mod_dialog =
-                        Some(ModInstallRequest::new(mods, self.game_path.clone()));
+                        Some(ModInstallRequest::new(mods, self.game_path.clone(),&self.game_chunk_path));
                 }
 
                 if ui
@@ -764,7 +764,7 @@ impl RepakModManager {
                     );
                     self.file_drop_viewport_open = true;
                     self.install_mod_dialog =
-                        Some(ModInstallRequest::new(mods, self.game_path.clone()));
+                        Some(ModInstallRequest::new(mods, self.game_path.clone(),&self.game_chunk_path));
                 }
                 if ui.button("Quit").clicked() {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -922,7 +922,7 @@ impl eframe::App for RepakModManager {
                         EventKind::Any => {
                             warn!("Received watcher event without a concrete kind")
                         }
-                        EventKind::Other => {}
+                        EventKind::Other | EventKind::Access(_) => {}
                         _ => {
                             collect_pak = true;
                         }

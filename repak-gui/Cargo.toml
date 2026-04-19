@@ -44,5 +44,10 @@ zip = "2.6.1"
 walkdir = "2.5.0"
 reqwest = { version = "0.13.1", features = ["blocking"] }
 semver = "1.0.27"
+num_cpus = "1.17.0"
 [build-dependencies]
 winres = "0.1.12"
+
+
+[profile.dev.package.retoc]
+opt-level = 3

@@ -2,12 +2,12 @@ use crate::install_mod::install_mod_logic::pak_files::repak_dir;
 use crate::install_mod::install_mod_logic::patch_meshes;
 use crate::install_mod::{InstallableMod, AES_KEY};
 use crate::utils::collect_files;
-use log::debug;
 use path_slash::PathExt;
 use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::ParallelIterator;
 use repak::Version;
 use retoc::*;
+use tracing::{debug, info};
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
@@ -120,12 +120,27 @@ pub fn convert_directory_to_iostore(
 pub fn repack_iostore_mod(
     pak: &InstallableMod,
     mod_dir: PathBuf,
-    game_paks_dir: &Path, // e.g. "C:\...\Marvel\Content\Paks"
+    game_paks_dir: PathBuf,
     packed_files_count: &AtomicI32,
 ) -> Result<(), repak::Error> {
     let temp_dir = tempfile::tempdir().map_err(repak::Error::Io)?;
     let temp_path = temp_dir.path().to_path_buf();
+    let mod_stem = pak.mod_path.file_stem().unwrap().to_str().unwrap();
 
+    // Copy mod files into the paks dir
+    let mut copied_files = vec![];
+    for ext in &["pak", "utoc", "ucas"] {
+        let src = pak.mod_path.with_extension(ext);
+        let dst = game_paks_dir.join(format!("{}.{}", mod_stem, ext));
+        if src.exists() {
+            std::fs::copy(&src, &dst).map_err(repak::Error::Io)?;
+            copied_files.push(dst);
+        }
+    }
+
+    // Build filter list
+    let utoc_path = pak.mod_path.with_extension("utoc");
+    let action_mn = ActionManifest::new(utoc_path.clone());
     let mut config = retoc::Config {
         container_header_version_override: None,
         ..Default::default()
@@ -136,29 +151,77 @@ pub fn repack_iostore_mod(
     config.aes_keys.insert(retoc::FGuid::default(), aes_toc);
     let config = Arc::new(config);
 
-    retoc::action_to_legacy(
-        ActionToLegacy {
-            input: game_paks_dir.to_path_buf(), // <-- paks dir, not mod utoc
-            output: temp_path.clone(),
-            filter: vec![pak
-                .mod_path
-                .file_stem()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .to_string()], // filter to only this mod's assets
-            no_assets: false,
-            no_shaders: true,
-            no_compres_shaders: true,
-            dry_run: false,
-            version: None,
-            verbose: false,
-            debug: false,
-            no_parallel: false,
-        },
-        config,
-    )
-    .map_err(|e| repak::Error::Io(std::io::Error::other(e.to_string())))?;
+    let filter: Vec<String> = action_manifest(action_mn, config.clone())
+        .map(|ops| {
+            let stems: Vec<String> = ops.oplog.entries.iter()
+                .filter_map(|entry| {
+                    std::path::Path::new(&entry.packagestoreentry.packagename)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .map(|s| s.to_string())
+                })
+                .collect();
+            if stems.is_empty() {
+                return vec![];
+            }
+            let first = &stems[0];
+            let common_len = stems.iter().fold(first.len(), |acc, s| {
+                acc.min(first.chars().zip(s.chars()).take_while(|(a, b)| a == b).count())
+            });
+            let prefix = &first[..common_len];
+            let trimmed = match prefix.rfind('_') {
+                Some(i) => &prefix[..i],
+                None => prefix,
+            };
+            if trimmed.len() > 4 {
+                vec![trimmed.to_string()]
+            } else {
+                stems
+            }
+        })
+        .unwrap_or_default();
 
-    convert_directory_to_iostore(pak, mod_dir, temp_path, packed_files_count)
+    let legacy_pak_path = temp_path.join("legacy.pak");
+    let legacy_pak_path_clone = legacy_pak_path.clone();
+    let game_paks_dir_clone = game_paks_dir.clone();
+
+    let result = std::thread::spawn(move || {
+        retoc::action_to_legacy(
+            ActionToLegacy {
+                input: game_paks_dir_clone,
+                output: legacy_pak_path_clone,
+                filter,
+                no_assets: false,
+                no_shaders: true,
+                no_compres_shaders: true,
+                dry_run: false,
+                version: None,
+                verbose: true,
+                debug: false,
+                no_parallel: false,
+            },
+            config,
+        )
+    })
+    .join()
+    .unwrap()
+    .map_err(|e| repak::Error::Io(std::io::Error::other(e.to_string())));
+
+    // Always clean up copied mod files from paks dir
+    for dst in copied_files {
+        let _ = std::fs::remove_file(dst);
+    }
+
+    result?;
+    
+    // Unpack the generated legacy pak
+    let legacy_output_dir = temp_path.join("legacy");
+    std::fs::create_dir_all(&legacy_output_dir).map_err(repak::Error::Io)?;
+    for entry in walkdir::WalkDir::new(&legacy_output_dir) {
+        let entry = entry.unwrap();
+        if entry.file_type().is_file() {
+            info!("  {:?}", entry.path());
+        }
+    }
+    convert_directory_to_iostore(pak, mod_dir, legacy_output_dir, packed_files_count)
 }

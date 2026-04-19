@@ -4,6 +4,7 @@ pub mod pak_files;
 pub mod patch_meshes;
 
 use crate::install_mod::InstallableMod;
+use crate::install_mod::install_mod_logic::iotoc::repack_iostore_mod;
 use iotoc::convert_directory_to_iostore;
 use pak_files::create_repak_from_pak;
 use std::path::{Path, PathBuf};
@@ -26,6 +27,7 @@ pub fn install_mods_in_viewport(
     mod_directory: &Path,
     installed_mods_ptr: &AtomicI32,
     stop_thread: &AtomicBool,
+    chunkdir: &Option<PathBuf>
 ) {
     info!("Installing queued mods");
     for installable_mod in mods.iter_mut() {
@@ -44,20 +46,22 @@ pub fn install_mods_in_viewport(
 
         if installable_mod.iostore {
 
-            /// THIS IS CURRENTLY BROKEN AS RETOC ISNT PROVIDED GAME GLOBAL CHUNKDATA FILE
-            /// WHEN THE UI IS UPDATED WE WILL ADD THIS CAPABILITY
+            // THIS IS CURRENTLY BROKEN AS RETOC ISNT PROVIDED GAME GLOBAL CHUNKDATA FILE
+            // WHEN THE UI IS UPDATED WE WILL ADD THIS CAPABILITY
 
-            // if installable_mod.repak {
-            //     info!(mod_name = %installable_mod.mod_name, mod_path = ?installable_mod.mod_path, "Repacking IoStore mod with current settings");
-            //     // unpack to temp dir, then convert_directory_to_iostore
-            //     if let Err(e) = repack_iostore_mod(
-            //         installable_mod,
-            //         PathBuf::from(mod_directory),
-            //         installed_mods_ptr,
-            //     ) {
-            //         error!(mod_name = %installable_mod.mod_name, error = %e, "Failed to repack IoStore mod");
-            //     }
-            // } else {
+            if installable_mod.repak && chunkdir.is_some() {
+                let chunkdir = chunkdir.clone().unwrap();
+                info!(mod_name = %installable_mod.mod_name, mod_path = ?installable_mod.mod_path, chunkdir = ?chunkdir, "Repacking IoStore mod with current settings");
+                // unpack to temp dir, then convert_directory_to_iostore
+                if let Err(e) = repack_iostore_mod(
+                    installable_mod,
+                    PathBuf::from(mod_directory),
+                    chunkdir.into(),
+                    installed_mods_ptr,
+                ) {
+                    error!(mod_name = %installable_mod.mod_name, error = %e, "Failed to repack IoStore mod");
+                }
+            } else {
                 info!(mod_name = %installable_mod.mod_name, mod_path = ?installable_mod.mod_path, "Copying iostore mod");
                 // copy the iostore files
                 let pak_path = installable_mod.mod_path.with_extension("pak");
@@ -76,7 +80,7 @@ pub fn install_mods_in_viewport(
                     }
                 }
                 continue;
-            // }
+            }
         }
 
         if installable_mod.repak {
