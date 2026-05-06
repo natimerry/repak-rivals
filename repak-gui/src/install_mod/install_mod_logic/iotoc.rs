@@ -7,6 +7,7 @@ use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::ParallelIterator;
 use repak::Version;
 use retoc::*;
+use zip::CompressionMethod;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
