@@ -182,9 +182,12 @@ impl RepakModManager {
     }
 
     fn set_game_pakchunk_path(&mut self) {
-        let path = &self.game_path.parent().unwrap();
+        let path = &self.game_path.parent();
+        if !path.is_some(){
+            return;
+        }
 
-        if let Some(paks_path) = match_exact_paks_suffix(path) {
+        if let Some(paks_path) = match_exact_paks_suffix(path.unwrap()) {
             self.game_chunk_path = Some(paks_path)
         }
     }
