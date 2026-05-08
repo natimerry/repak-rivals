@@ -7,7 +7,6 @@ use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::ParallelIterator;
 use repak::Version;
 use retoc::*;
-use zip::CompressionMethod;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
@@ -58,6 +57,7 @@ pub fn convert_directory_to_iostore(
         to_pak_dir.clone(),
         mod_dir.join(utoc_name),
         EngineVersion::UE5_3,
+        Some(compression::CompressionMethod::Oodle),
     )
     .with_obfuscation(pak.obfuscated);
 
