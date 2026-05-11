@@ -336,8 +336,8 @@ impl ModInstallRequest {
                                     Checkbox::new(&mut mods.repak, "To repak"),
                                 );
                                 ui.add_enabled(
-                                    mods.is_dir || mods.repak,
-                                    Checkbox::new(&mut mods.fix_mesh, "Fix mesh"),
+                                    (mods.is_dir || mods.repak) && false, // new retoc should auto patch
+                                    Checkbox::new(&mut mods.fix_mesh, "Fix mesh (outdated)"),
                                 );
 
                                 ui.add_enabled(

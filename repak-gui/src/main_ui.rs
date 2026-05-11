@@ -622,16 +622,19 @@ impl RepakModManager {
                                                     tag_stroke,
                                                 );
                                             }
-                                            let chars = &self.pak_files[i].characteristic;
-                                            let (tag_text, tag_fill, tag_stroke) =
-                                                tag_colors(&chars);
-                                            self.metadata_chip(
-                                                ui,
-                                                &format!("{}",&chars),
-                                                tag_text,
-                                                tag_fill,
-                                                tag_stroke,
-                                            );
+                                            if self.show_char_details{
+                                                let chars = &self.pak_files[i].characteristic;
+                                                let (tag_text, tag_fill, tag_stroke) =
+                                                    tag_colors(&chars);
+                                                self.metadata_chip(
+                                                    ui,
+                                                    &format!("{}",&chars),
+                                                    tag_text,
+                                                    tag_fill,
+                                                    tag_stroke,
+                                                );
+                                            }
+
                                             // ui.add(Label::new(get_current_pak_characteristics(paths)));
                                         });
                                     });
@@ -1224,8 +1227,12 @@ impl RepakModManager {
                 );
                 set_custom_font_size(ui.ctx(), self.default_font_size);
                 ui.horizontal(|ui| {
-                    ui.label("Show Suffix");
+                    ui.label("Show Load Order Suffix");
                     ui.add(ios_widget::toggle(&mut self.show_load_order_suffix));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Show Character Details");
+                    ui.add(ios_widget::toggle(&mut self.show_char_details));
                 });
             });
 

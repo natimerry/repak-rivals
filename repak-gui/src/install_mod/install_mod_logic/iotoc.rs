@@ -9,7 +9,7 @@ use repak::Version;
 use retoc::*;
 use std::fs::File;
 use std::io::BufWriter;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::AtomicI32;
 use std::sync::Arc;
@@ -123,7 +123,7 @@ pub fn to_legacy_uasset(
     pak: PathBuf,
     output_dir: PathBuf,
     game_paks_dir: PathBuf,
-    packed_files_count: &AtomicI32,
+    _packed_files_count: &AtomicI32,
 ) -> Result<(), repak::Error> {
     let temp_dir = tempfile::tempdir().map_err(repak::Error::Io)?;
     let temp_path = temp_dir.path().to_path_buf();
