@@ -16,6 +16,8 @@ use repak::{Compression, PakReader};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
+#[cfg(all(windows, not(debug_assertions)))]
+use std::process::Command;
 use std::str::FromStr;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicBool, AtomicI32};
@@ -24,6 +26,27 @@ use std::thread;
 use tempfile::tempdir;
 use tracing::{debug, error, info, instrument, warn};
 use walkdir::WalkDir;
+
+#[cfg(all(windows, not(debug_assertions)))]
+fn spawn_install_terminal() {
+    match Command::new("cmd")
+        .args([
+            "/C",
+            "start",
+            "repak-rivals install",
+            "cmd",
+            "/K",
+            "echo repak-rivals install started. Close this window when finished.",
+        ])
+        .spawn()
+    {
+        Ok(_) => info!("Spawned install terminal"),
+        Err(err) => warn!(error = %err, "Failed to spawn install terminal"),
+    }
+}
+
+#[cfg(any(not(windows), debug_assertions))]
+fn spawn_install_terminal() {}
 
 #[derive(Debug, Clone)]
 pub struct InstallableMod {
@@ -161,6 +184,7 @@ impl ModInstallRequest {
 
                                 if install_mod.clicked() {
                                     info!("Starting install worker");
+                                    spawn_install_terminal();
                                     let mut mods = self.mods.to_vec(); // clone
 
                                     let dir = self.mod_directory.clone();
