@@ -7,6 +7,7 @@ use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::ParallelIterator;
 use repak::Version;
 use retoc::*;
+use walkdir::WalkDir;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::PathBuf;
@@ -199,6 +200,22 @@ pub fn to_legacy_uasset(
     .join()
     .unwrap()
     .map_err(|e| repak::Error::Io(std::io::Error::other(e.to_string())));
+
+    // Copy extracted files from temp legacy dir to the actual output dir
+    for entry in WalkDir::new(&legacy_output_dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+    {
+        let src = entry.path();
+        let relative = src.strip_prefix(&legacy_output_dir).unwrap();
+        let dst = output_dir.join(relative);
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent).map_err(repak::Error::Io)?;
+        }
+        std::fs::copy(src, &dst).map_err(repak::Error::Io)?;
+        info!("Copied {:?} → {:?}", src, dst);
+    }
 
     for dst in copied_files {
         let _ = std::fs::remove_file(dst);
