@@ -634,8 +634,6 @@ impl RepakModManager {
                                                     tag_stroke,
                                                 );
                                             }
-
-                                            // ui.add(Label::new(get_current_pak_characteristics(paths)));
                                         });
                                     });
 
@@ -643,6 +641,7 @@ impl RepakModManager {
                                         let mut enabled = pak_enabled;
                                         let toggler = ui.add(ios_widget::toggle(&mut enabled));
                                         if toggler.clicked() {
+                                            println!("Clicked toggler");
                                             let toggled_path = pak_path.clone();
                                             let enable_mod = enabled;
                                             if let Some(new_path) =
