@@ -10,7 +10,7 @@ use crate::install_mod::{
 use crate::ios_widget;
 use crate::utils::find_marvel_rivals;
 use crate::utils::get_current_pak_characteristics;
-use crate::utoc_utils::read_utoc;
+use crate::utoc_utils::{is_iostore_obfuscated, read_utoc};
 use crate::welcome::ShowWelcome;
 
 use eframe::egui::{
@@ -36,6 +36,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use walkdir::WalkDir;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+const RED_THEME_COLOR: Color32 = Color32::from_rgb(255, 31, 75);
 
 // use eframe::egui::WidgetText::RichText;
 #[derive(Deserialize, Serialize, Default)]
@@ -66,9 +67,37 @@ pub struct RepakModManager {
     hide_welcome: bool,
     #[serde(skip)]
     mod_files_search_query: String,
+    #[serde(skip)]
+    selected_tag_filters: Vec<String>,
+    #[serde(skip)]
+    selected_category_filters: Vec<String>,
+    #[serde(skip)]
+    new_tag_name: String,
     version: Option<String>,
 
     game_chunk_path: Option<PathBuf>,
+    #[serde(skip)]
+    launch_game_paths: Option<Result<crate::launch_game::GameLaunchPaths, String>>,
+    #[serde(default)]
+    tag_catalog: Vec<String>,
+    #[serde(default)]
+    mod_tags: Vec<ModTagAssignment>,
+
+    #[serde(default)]
+    show_load_order_suffix: bool,
+
+    #[serde(default = "default_true")]
+    show_char_details: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct ModTagAssignment {
+    path: PathBuf,
+    tags: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -76,6 +105,8 @@ struct ModEntry {
     reader: PakReader,
     path: PathBuf,
     enabled: bool,
+    category: String,
+    characteristic: String,
 }
 fn use_dark_red_accent(style: &mut Style) {
     style.visuals.hyperlink_color = Color32::from_hex("#f71034").expect("Invalid color");
@@ -182,12 +213,12 @@ impl RepakModManager {
     }
 
     fn set_game_pakchunk_path(&mut self) {
-        let path = &self.game_path.parent();
-        if !path.is_some(){
+        self.game_chunk_path = None;
+        let Some(path) = self.game_path.parent() else {
             return;
-        }
+        };
 
-        if let Some(paks_path) = match_exact_paks_suffix(path.unwrap()) {
+        if let Some(paks_path) = match_exact_paks_suffix(path) {
             self.game_chunk_path = Some(paks_path)
         }
     }
@@ -229,10 +260,13 @@ impl RepakModManager {
                     continue;
                 }
                 let pak = pak.unwrap();
+                let file_list = Self::files_for_category(&pak, path);
                 let entry = ModEntry {
                     reader: pak,
                     path: path.to_path_buf(),
                     enabled: !disabled,
+                    category: detect_mod_category(&file_list),
+                    characteristic: get_current_pak_characteristics(file_list),
                 };
                 vecs.push(entry);
             }
@@ -248,6 +282,20 @@ impl RepakModManager {
                 self.table = None;
             }
             info!(mod_entries = self.pak_files.len(), "Loaded mod entries");
+        }
+    }
+
+    fn files_for_category(pak: &PakReader, pak_path: &Path) -> Vec<String> {
+        let mut utoc_path = pak_path.to_path_buf();
+        utoc_path.set_extension("utoc");
+
+        if utoc_path.exists() {
+            read_utoc(&utoc_path, pak, pak_path)
+                .iter()
+                .map(|entry| entry.file_path.clone())
+                .collect()
+        } else {
+            pak.files()
         }
     }
 
@@ -321,50 +369,59 @@ impl RepakModManager {
             return;
         }
         use egui::{Label, RichText};
-        let pak = &self.pak_files[self.current_pak_file_idx.unwrap()].reader;
-        let pak_path = self.pak_files[self.current_pak_file_idx.unwrap()]
-            .path
-            .clone();
+        let Some(current_idx) = self.current_pak_file_idx else {
+            return;
+        };
+        let Some(current_mod) = self.pak_files.get(current_idx) else {
+            return;
+        };
+        let pak = &current_mod.reader;
+        let pak_path = current_mod.path.clone();
 
         let full_paths = pak.files().into_iter().collect::<Vec<_>>();
+        let mut utoc_path = pak_path.to_path_buf();
+        utoc_path.set_extension("utoc");
+        let obfuscated = if utoc_path.exists() {
+            match is_iostore_obfuscated(&utoc_path) {
+                Ok(value) => value.to_string(),
+                Err(e) => {
+                    warn!(path = %utoc_path.display(), error = %e, "Failed to read IoStore obfuscation flag");
+                    "Unknown".to_string()
+                }
+            }
+        } else {
+            "false".to_string()
+        };
 
-        ui.collapsing("Encryption details", |ui| {
-            ui.horizontal(|ui| {
-                ui.add(Label::new(RichText::new("Encryption: ").strong()));
-                ui.add(Label::new(format!("{}", pak.encrypted_index())));
-            });
+        egui::CollapsingHeader::new("Pak details")
+            .default_open(true)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.add(Label::new(RichText::new("Mount Point: ").strong()));
+                    ui.add(Label::new(pak.mount_point().to_string()));
+                });
 
-            ui.horizontal(|ui| {
-                ui.add(Label::new(RichText::new("Encryption GUID: ").strong()));
-                ui.add(Label::new(format!("{:?}", pak.encryption_guid())));
-            });
-        });
+                ui.horizontal(|ui| {
+                    ui.add(Label::new(RichText::new("Path Hash Seed: ").strong()));
+                    ui.add(Label::new(format!("{:?}", pak.path_hash_seed())));
+                });
 
-        ui.collapsing("Pak details", |ui| {
-            ui.horizontal(|ui| {
-                ui.add(Label::new(RichText::new("Mount Point: ").strong()));
-                ui.add(Label::new(pak.mount_point().to_string()));
-            });
+                ui.horizontal(|ui| {
+                    ui.add(Label::new(RichText::new("Version: ").strong()));
+                    ui.add(Label::new(format!("{:?}", pak.version())));
+                });
 
-            ui.horizontal(|ui| {
-                ui.add(Label::new(RichText::new("Path Hash Seed: ").strong()));
-                ui.add(Label::new(format!("{:?}", pak.path_hash_seed())));
+                ui.horizontal(|ui| {
+                    ui.add(Label::new(RichText::new("Obfuscated: ").strong()));
+                    ui.add(Label::new(obfuscated));
+                });
             });
-
-            ui.horizontal(|ui| {
-                ui.add(Label::new(RichText::new("Version: ").strong()));
-                ui.add(Label::new(format!("{:?}", pak.version())));
-            });
-        });
         ui.horizontal(|ui| {
             ui.add(Label::new(
                 RichText::new("Mod type: ")
                     .strong()
                     .size(self.default_font_size + 1.),
             ));
-            let mut utoc_path = pak_path.to_path_buf();
-            utoc_path.set_extension("utoc");
-
             let paths = {
                 if utoc_path.exists() {
                     let file = read_utoc(&utoc_path, pak, &pak_path)
@@ -389,175 +446,531 @@ impl RepakModManager {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("Search:");
+                    ui.horizontal_wrapped(|ui| {
                         ui.add(
                             TextEdit::singleline(&mut self.mod_files_search_query)
-                                .hint_text("Filter mod files...")
-                                .desired_width(220.0),
+                                .hint_text("Search mods, paths, tags...")
+                                .desired_width(230.0),
                         );
-                        if ui.button("Clear").clicked() {
+                        egui::ComboBox::from_id_salt("category_filter")
+                            .width(145.0)
+                            .selected_text(filter_label(
+                                "Category",
+                                &self.selected_category_filters,
+                            ))
+                            .show_ui(ui, |ui| {
+                                if ui
+                                    .button(if self.selected_category_filters.is_empty() {
+                                        "All categories"
+                                    } else {
+                                        "Clear categories"
+                                    })
+                                    .clicked()
+                                {
+                                    self.selected_category_filters.clear();
+                                }
+                                ui.separator();
+                                for category in self.category_options() {
+                                    let mut selected =
+                                        self.selected_category_filters.contains(&category);
+                                    if ui.checkbox(&mut selected, &category).changed() {
+                                        toggle_filter_value(
+                                            &mut self.selected_category_filters,
+                                            category,
+                                            selected,
+                                        );
+                                    }
+                                }
+                            });
+
+                        egui::ComboBox::from_id_salt("tag_filter")
+                            .width(135.0)
+                            .selected_text(filter_label("Tag", &self.selected_tag_filters))
+                            .show_ui(ui, |ui| {
+                                if ui
+                                    .button(if self.selected_tag_filters.is_empty() {
+                                        "All tags"
+                                    } else {
+                                        "Clear tags"
+                                    })
+                                    .clicked()
+                                {
+                                    self.selected_tag_filters.clear();
+                                }
+                                ui.separator();
+                                for tag in self.tag_catalog.clone() {
+                                    let mut selected = self.selected_tag_filters.contains(&tag);
+                                    if ui.checkbox(&mut selected, &tag).changed() {
+                                        toggle_filter_value(
+                                            &mut self.selected_tag_filters,
+                                            tag,
+                                            selected,
+                                        );
+                                    }
+                                }
+                            });
+
+                        let has_filters = !self.mod_files_search_query.is_empty()
+                            || !self.selected_category_filters.is_empty()
+                            || !self.selected_tag_filters.is_empty();
+                        if ui.add_enabled(has_filters, Button::new("Reset")).clicked() {
                             self.mod_files_search_query.clear();
+                            self.selected_category_filters.clear();
+                            self.selected_tag_filters.clear();
                         }
                     });
-                    ui.add_space(6.0);
+                    ui.add_space(8.0);
 
-                    for (i, pak_file) in self.pak_files.iter_mut().enumerate() {
+                    for i in 0..self.pak_files.len() {
                         let search_query = self.mod_files_search_query.trim().to_lowercase();
-                        let raw_name = pak_file
-                            .path
+                        let pak_path = self.pak_files[i].path.clone();
+                        let pak_category = self.pak_files[i].category.clone();
+                        let pak_enabled = self.pak_files[i].enabled;
+                        let raw_name = pak_path
                             .file_stem()
-                            .unwrap()
-                            .to_string_lossy()
+                            .and_then(|stem| stem.to_str())
+                            .unwrap_or_default()
                             .to_string();
                         let display_name = normalize_mod_display_name(&raw_name.clone());
                         let has_suffix_indicator = has_mod_suffix(&raw_name);
-                        let raw_path = pak_file.path.to_string_lossy().to_string();
+                        let raw_path = pak_path.to_string_lossy().to_string();
+                        let tag_list = self.tags_for_mod(&pak_path);
                         if !search_query.is_empty()
                             && !raw_name.to_lowercase().contains(&search_query)
                             && !display_name.to_lowercase().contains(&search_query)
                             && !raw_path.to_lowercase().contains(&search_query)
+                            && !tag_list.iter().any(|tag| tag.to_lowercase().contains(&search_query))
+                        {
+                            continue;
+                        }
+                        if !self.selected_category_filters.is_empty()
+                            && !self.selected_category_filters.contains(&pak_category)
+                        {
+                            continue;
+                        }
+                        if !self.selected_tag_filters.is_empty()
+                            && !tag_list
+                                .iter()
+                                .any(|tag| self.selected_tag_filters.contains(tag))
                         {
                             continue;
                         }
 
-                        ui.horizontal(|ui| {
-                            ui.with_layout(egui::Layout::left_to_right(Align::LEFT), |ui| {
-                                ui.set_max_width(ui.available_width() * 0.85);
-                                let pak_print = display_name;
+                        let mut utoc_path = pak_path.clone();
+                        utoc_path.set_extension("utoc");
+                        let is_iostore = utoc_path.exists();
+                        let is_selected = self.current_pak_file_idx == Some(i);
+                        let row_fill = if is_selected {
+                            Color32::from_rgb(54, 28, 35)
+                        } else {
+                            Color32::from_rgb(35, 35, 35)
+                        };
+                        let row_stroke = if is_selected {
+                            Stroke::new(1.0, RED_THEME_COLOR)
+                        } else {
+                            Stroke::new(1.0, Color32::from_rgb(64, 64, 64))
+                        };
 
-                                let mut label_text = RichText::new(&pak_print).strong();
-                                if self.current_pak_file_idx == Some(i) {
-                                    label_text = label_text
-                                        .background_color(Color32::from_hex("#f71034").unwrap());
-                                }
+                        let row = egui::Frame::NONE
+                            .fill(row_fill)
+                            .stroke(row_stroke)
+                            .corner_radius(4)
+                            .inner_margin(egui::Margin::symmetric(8, 6))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    let left_width = (ui.available_width() - 62.0).max(120.0);
+                                    ui.vertical(|ui| {
+                                        ui.set_width(left_width);
+                                        ui.add(
+                                            Label::new(
+                                                RichText::new(&display_name)
+                                                    .strong()
+                                                    .size(self.default_font_size),
+                                            )
+                                            .truncate()
+                                            .selectable(false),
+                                        );
 
-                                let pakfile = ui.add(
-                                    Label::new(label_text).truncate().selectable(true),
-                                );
-                                let len = (&pak_print.clone()).len();
-                                if has_suffix_indicator && len < 30 {
-                                    ui.label(
-                                        RichText::new("_9999999_P")
-                                            .size(self.default_font_size - 5.0)
-                                            .color(Color32::GRAY),
-                                    );
-                                }
-
-                                if pakfile.clicked() {
-                                    self.current_pak_file_idx = Some(i);
-                                    self.table =
-                                        Some(FileTable::new(&pak_file.reader, &pak_file.path));
-                                }
-
-                                let mut utoc_path = pak_file.path.clone();
-                                utoc_path.set_extension("utoc");
-
-                                let is_iostore = utoc_path.exists();
-                                pakfile.context_menu(|ui| {
-                                    if ui.button("Extract pak to directory").clicked(){
-                                        info!(mod_path = ?pak_file.path, "Preparing extraction");
-                                        self.current_pak_file_idx = Some(i);
-                                        let dir = rfd::FileDialog::new().pick_folder();
-                                        if let Some(dir) = dir {
-                                            let mod_name = pak_file.path.file_stem().unwrap().to_string_lossy().to_string();
-                                            let to_create = dir.join(&mod_name);
-                                            fs::create_dir_all(&to_create).unwrap();
-                                            // check if installable file has a utoc file present and do a utoc extract if present
-                                            //
-                                            let mut utoc_path = pak_file.path.clone();
-                                            utoc_path.set_extension("utoc");
-
-                                            if utoc_path.exists(){
-                                                info!("Extracting as utoc...");
-                                                let action: ActionUnpack = ActionUnpack {
-                                                    utoc: PathBuf::from(&utoc_path),
-                                                    output: to_create,
-                                                    verbose: true,
-                                                };
-
-                                                let mut config = retoc::Config {
-                                                    container_header_version_override: None,
-                                                    ..Default::default()
-                                                };
-
-                                                let aes_toc = retoc::AesKey::from_str(
-                                                    "0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74",
-                                                )
-                                                .unwrap();
-
-                                                config.aes_keys.insert(retoc::FGuid::default(), aes_toc.clone());
-                                                let config = std::sync::Arc::new(config);
-
-                                                retoc::action_unpack(action, config).expect("Failed to extract");
+                                        ui.add_space(2.0);
+                                        ui.horizontal_wrapped(|ui| {
+                                            if has_suffix_indicator && self.show_load_order_suffix{
+                                                self.metadata_chip(
+                                                    ui,
+                                                    "_9999999_P",
+                                                    Color32::from_rgb(180, 180, 180),
+                                                    Color32::from_rgb(58, 58, 58),
+                                                    Color32::from_rgb(82, 82, 82),
+                                                );
                                             }
-                                            else {
-                                                let installable_mod = InstallableMod{
-                                                    mod_name: mod_name.clone(),
-                                                    mod_type: "".to_string(),
-                                                    reader: Option::from(pak_file.reader.clone()),
-                                                    mod_path: pak_file.path.clone(),
-                                                    ..Default::default()
-                                                };
-                                                if let Err(e) = extract_pak_to_dir(&installable_mod,to_create){
-                                                    error!(mod_path = ?pak_file.path, error = %e, "Failed to extract mod");
-                                                }
+                                            let (category_text, category_fill, category_stroke) =
+                                                category_colors(&pak_category);
+                                            self.metadata_chip(
+                                                ui,
+                                                &pak_category,
+                                                category_text,
+                                                category_fill,
+                                                category_stroke,
+                                            );
+                                            for tag in &tag_list {
+                                                let (tag_text, tag_fill, tag_stroke) =
+                                                    tag_colors(tag);
+                                                self.metadata_chip(
+                                                    ui,
+                                                    &format!("#{tag}"),
+                                                    tag_text,
+                                                    tag_fill,
+                                                    tag_stroke,
+                                                );
                                             }
-                                        }
-                                    }
-                                    if is_iostore && self.game_chunk_path.is_some(){
-                                        if ui.button("To legacy asset").clicked()
-                                        {
+                                            let chars = &self.pak_files[i].characteristic;
+                                            let (tag_text, tag_fill, tag_stroke) =
+                                                tag_colors(&chars);
+                                            self.metadata_chip(
+                                                ui,
+                                                &format!("{}",&chars),
+                                                tag_text,
+                                                tag_fill,
+                                                tag_stroke,
+                                            );
+                                            // ui.add(Label::new(get_current_pak_characteristics(paths)));
+                                        });
+                                    });
 
-                                            let dir = rfd::FileDialog::new().pick_folder();
-                                            if let Some(dir) = dir
+                                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                        let mut enabled = pak_enabled;
+                                        let toggler = ui.add(ios_widget::toggle(&mut enabled));
+                                        if toggler.clicked() {
+                                            let toggled_path = pak_path.clone();
+                                            let enable_mod = enabled;
+                                            if let Some(new_path) =
+                                                Self::toggle_mod_file(&toggled_path, enable_mod)
                                             {
-                                                #[cfg(windows)]
-                                                {
-                                                    crate::ensure_console();
-                                                    crate::redirect_stdio();
+                                                self.update_tag_path(&toggled_path, &new_path);
+                                                if let Err(e) = self.save_state() {
+                                                    warn!(error = %e, "Failed to save tag path after toggle");
                                                 }
-
-                                                to_legacy_uasset(pak_file.path.clone(), dir, self.game_chunk_path.clone().unwrap(), &AtomicI32::new(0)).unwrap();
-                                                #[cfg(windows)]
-                                                free_console();
-
+                                                let pak_file = &mut self.pak_files[i];
+                                                pak_file.path = new_path;
+                                                pak_file.enabled = enabled;
+                                                if self.current_pak_file_idx == Some(i) {
+                                                    self.table = Some(FileTable::new(
+                                                        &pak_file.reader,
+                                                        &pak_file.path,
+                                                    ));
+                                                }
+                                            } else {
+                                                self.pak_files[i].enabled = !enabled;
                                             }
-
                                         }
-                                    }
-                                    if ui.button("Delete mod").clicked(){
-                                        let pak_path = pak_file.path.clone();
-                                        if Self::delete_mod_files(&pak_path).is_err() {
-                                            return;
-                                        }
-                                        self.current_pak_file_idx = None;
-                                    }
-
+                                    });
                                 });
                             });
 
-                            // I think we can keep utoc and ucas uncommented as they are only loaded if a valid pak file is present
-                            ui.with_layout(egui::Layout::right_to_left(Align::RIGHT), |ui| {
-                                let toggler = ui.add(ios_widget::toggle(&mut pak_file.enabled));
-                                if toggler.clicked() {
-                                    let toggled_path = pak_file.path.clone();
-                                    let enable_mod = pak_file.enabled;
-                                    if let Some(new_path) = Self::toggle_mod_file(&toggled_path, enable_mod) {
-                                        pak_file.path = new_path;
-                                        if self.current_pak_file_idx == Some(i) {
-                                            self.table =
-                                                Some(FileTable::new(&pak_file.reader, &pak_file.path));
-                                        }
-                                    } else {
-                                        pak_file.enabled = !pak_file.enabled;
-                                    }
-                                }
-                            });
+                        let row_response = ui
+                            .interact(
+                                row.response.rect,
+                                ui.make_persistent_id(("mod_row", raw_path.as_str())),
+                                egui::Sense::click(),
+                            )
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .on_hover_text(format!("View files and details\n{}", raw_path));
+
+                        if row_response.hovered() && !is_selected {
+                            ui.painter().rect_stroke(
+                                row_response.rect,
+                                4,
+                                Stroke::new(1.0, Color32::from_rgb(94, 94, 94)),
+                                egui::StrokeKind::Outside,
+                            );
+                        }
+
+                        if row_response.clicked() {
+                            self.current_pak_file_idx = Some(i);
+                            let pak_file = &self.pak_files[i];
+                            self.table = Some(FileTable::new(&pak_file.reader, &pak_file.path));
+                        }
+
+                        row_response.context_menu(|ui| {
+                            self.show_mod_context_menu(ui, i, &pak_path, is_iostore);
                         });
+                        ui.add_space(4.0);
                     }
                 });
             });
+    }
+
+    fn metadata_chip(
+        &self,
+        ui: &mut egui::Ui,
+        text: &str,
+        text_color: Color32,
+        fill: Color32,
+        stroke: Color32,
+    ) {
+        egui::Frame::NONE
+            .fill(fill)
+            .stroke(Stroke::new(1.0, stroke))
+            .corner_radius(3)
+            .inner_margin(egui::Margin::symmetric(5, 2))
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new(text)
+                        .size((self.default_font_size - 5.0).max(10.0))
+                        .color(text_color),
+                );
+            });
+    }
+
+    fn show_mod_context_menu(
+        &mut self,
+        ui: &mut egui::Ui,
+        i: usize,
+        pak_path: &Path,
+        is_iostore: bool,
+    ) {
+        self.show_tag_context_menu(ui, pak_path);
+        ui.separator();
+        if ui.button("Extract pak to directory").clicked() {
+            info!(mod_path = ?pak_path, "Preparing extraction");
+            self.current_pak_file_idx = Some(i);
+            let dir = rfd::FileDialog::new().pick_folder();
+            if let Some(dir) = dir {
+                let mod_name = pak_path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or("extracted_mod")
+                    .to_string();
+                let to_create = dir.join(&mod_name);
+                if let Err(e) = fs::create_dir_all(&to_create) {
+                    error!(path = ?to_create, error = %e, "Failed to create extraction directory");
+                    return;
+                }
+
+                let mut utoc_path = pak_path.to_path_buf();
+                utoc_path.set_extension("utoc");
+
+                if utoc_path.exists() {
+                    info!("Extracting as utoc...");
+                    let action: ActionUnpack = ActionUnpack {
+                        utoc: PathBuf::from(&utoc_path),
+                        output: to_create,
+                        verbose: true,
+                    };
+
+                    let mut config = retoc::Config {
+                        container_header_version_override: None,
+                        ..Default::default()
+                    };
+
+                    let aes_toc = retoc::AesKey::from_str(
+                        "0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74",
+                    );
+                    let aes_toc = match aes_toc {
+                        Ok(key) => key,
+                        Err(e) => {
+                            error!(error = %e, "Failed to parse AES key for IoStore extraction");
+                            return;
+                        }
+                    };
+
+                    config
+                        .aes_keys
+                        .insert(retoc::FGuid::default(), aes_toc.clone());
+                    let config = std::sync::Arc::new(config);
+
+                    if let Err(e) = retoc::action_unpack(action, config) {
+                        error!(error = %e, "Failed to extract IoStore mod");
+                    }
+                } else {
+                    let Some(pak_file) = self.pak_files.get(i) else {
+                        warn!(
+                            mod_index = i,
+                            "Cannot extract mod because the row no longer exists"
+                        );
+                        return;
+                    };
+                    let installable_mod = InstallableMod {
+                        mod_name: mod_name.clone(),
+                        mod_type: "".to_string(),
+                        reader: Option::from(pak_file.reader.clone()),
+                        mod_path: pak_path.to_path_buf(),
+                        ..Default::default()
+                    };
+                    if let Err(e) = extract_pak_to_dir(&installable_mod, to_create) {
+                        error!(mod_path = ?pak_path, error = %e, "Failed to extract mod");
+                    }
+                }
+            }
+        }
+        if is_iostore && self.game_chunk_path.is_some() {
+            if ui.button("To legacy asset").clicked() {
+                let dir = rfd::FileDialog::new().pick_folder();
+                if let Some(dir) = dir {
+                    let Some(game_chunk_path) = self.game_chunk_path.clone() else {
+                        warn!("Cannot convert to legacy without a detected game chunk path");
+                        return;
+                    };
+                    #[cfg(windows)]
+                    {
+                        crate::ensure_console();
+                        crate::redirect_stdio();
+                    }
+
+                    if let Err(e) = to_legacy_uasset(
+                        pak_path.to_path_buf(),
+                        dir,
+                        game_chunk_path,
+                        &AtomicI32::new(0),
+                    ) {
+                        error!(error = %e, "Failed to convert mod to legacy asset");
+                    }
+                    #[cfg(windows)]
+                    free_console();
+                }
+            }
+        }
+        if ui.button("Delete mod").clicked() {
+            if Self::delete_mod_files(pak_path).is_err() {
+                return;
+            }
+            self.remove_all_tags_for_mod(pak_path);
+            if let Err(e) = self.save_state() {
+                warn!(error = %e, "Failed to save tag cleanup after delete");
+            }
+            self.current_pak_file_idx = None;
+        }
+    }
+
+    fn show_tag_context_menu(&mut self, ui: &mut egui::Ui, mod_path: &Path) {
+        ui.menu_button("Tags", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("New:");
+                ui.add(
+                    TextEdit::singleline(&mut self.new_tag_name)
+                        .hint_text("tag name")
+                        .desired_width(120.0),
+                );
+            });
+            let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
+                .fill(Color32::from_rgb(186, 31, 59))
+                .stroke(Stroke::new(1.0, Color32::from_rgb(255, 70, 105)));
+            if ui.add(create_button).clicked() {
+                let tag = self.new_tag_name.trim().to_string();
+                if !tag.is_empty() {
+                    self.add_tag_to_mod(mod_path, &tag);
+                    self.new_tag_name.clear();
+                    if let Err(e) = self.save_state() {
+                        warn!(error = %e, "Failed to save tag assignment");
+                    }
+                    ui.close_menu();
+                }
+            }
+
+            let catalog = self.tag_catalog.clone();
+            for tag in catalog {
+                let (text_color, fill, stroke) = tag_colors(&tag);
+                let tag_button = Button::new(RichText::new(format!("#{tag}")).color(text_color))
+                    .fill(fill)
+                    .stroke(Stroke::new(1.0, stroke));
+                if ui.add(tag_button).clicked() {
+                    self.add_tag_to_mod(mod_path, &tag);
+                    if let Err(e) = self.save_state() {
+                        warn!(error = %e, "Failed to save tag assignment");
+                    }
+                    ui.close_menu();
+                }
+            }
+        });
+
+        let tags = self.tags_for_mod(mod_path);
+        if !tags.is_empty() {
+            ui.menu_button("Remove tag", |ui| {
+                for tag in tags {
+                    if ui.button(format!("Remove #{tag}")).clicked() {
+                        self.remove_tag_from_mod(mod_path, &tag);
+                        if let Err(e) = self.save_state() {
+                            warn!(error = %e, "Failed to save tag removal");
+                        }
+                        ui.close_menu();
+                    }
+                }
+            });
+        }
+    }
+
+    fn category_options(&self) -> Vec<String> {
+        let mut categories = self
+            .pak_files
+            .iter()
+            .map(|entry| entry.category.clone())
+            .collect::<Vec<_>>();
+        categories.sort();
+        categories.dedup();
+        categories
+    }
+
+    fn tags_for_mod(&self, mod_path: &Path) -> Vec<String> {
+        self.mod_tags
+            .iter()
+            .find(|assignment| same_mod_identity(&assignment.path, mod_path))
+            .map(|assignment| assignment.tags.clone())
+            .unwrap_or_default()
+    }
+
+    fn add_tag_to_mod(&mut self, mod_path: &Path, tag: &str) {
+        let tag = tag.trim();
+        if tag.is_empty() {
+            return;
+        }
+
+        if !self.tag_catalog.iter().any(|existing| existing == tag) {
+            self.tag_catalog.push(tag.to_string());
+            self.tag_catalog.sort();
+        }
+
+        if let Some(assignment) = self
+            .mod_tags
+            .iter_mut()
+            .find(|assignment| same_mod_identity(&assignment.path, mod_path))
+        {
+            if !assignment.tags.iter().any(|existing| existing == tag) {
+                assignment.tags.push(tag.to_string());
+                assignment.tags.sort();
+            }
+            return;
+        }
+
+        self.mod_tags.push(ModTagAssignment {
+            path: mod_path.to_path_buf(),
+            tags: vec![tag.to_string()],
+        });
+    }
+
+    fn remove_tag_from_mod(&mut self, mod_path: &Path, tag: &str) {
+        if let Some(assignment) = self
+            .mod_tags
+            .iter_mut()
+            .find(|assignment| same_mod_identity(&assignment.path, mod_path))
+        {
+            assignment.tags.retain(|existing| existing != tag);
+        }
+        self.mod_tags
+            .retain(|assignment| !assignment.tags.is_empty());
+    }
+
+    fn remove_all_tags_for_mod(&mut self, mod_path: &Path) {
+        self.mod_tags
+            .retain(|assignment| !same_mod_identity(&assignment.path, mod_path));
+    }
+
+    fn update_tag_path(&mut self, old_path: &Path, new_path: &Path) {
+        if let Some(assignment) = self
+            .mod_tags
+            .iter_mut()
+            .find(|assignment| same_mod_identity(&assignment.path, old_path))
+        {
+            assignment.path = new_path.to_path_buf();
+        }
     }
     fn config_path() -> PathBuf {
         let mut path = dirs::config_dir()
@@ -805,17 +1218,14 @@ impl RepakModManager {
             });
 
             ui.menu_button("Settings", |ui| {
+                ui.label("Font Size: ");
                 ui.add(
-                    egui::Slider::new(&mut self.default_font_size, 12.0..=32.0).text("Font size"),
+                    egui::Slider::new(&mut self.default_font_size, 12.0..=32.0),
                 );
                 set_custom_font_size(ui.ctx(), self.default_font_size);
                 ui.horizontal(|ui| {
-                    let mode = match ui.ctx().style().visuals.dark_mode {
-                        true => "Switch to light mode",
-                        false => "Switch to dark mode",
-                    };
-                    ui.add(egui::Label::new(mode).halign(Align::Center));
-                    egui::widgets::global_theme_preference_switch(ui);
+                    ui.label("Show Suffix");
+                    ui.add(ios_widget::toggle(&mut self.show_load_order_suffix));
                 });
             });
 
@@ -845,6 +1255,8 @@ impl RepakModManager {
                         if let Err(e) = fs::create_dir_all(&self.game_path) {
                             warn!(error = %e, path = %self.game_path.to_string_lossy(), "Failed to create selected mod directory");
                         }
+                        self.set_game_pakchunk_path();
+                        self.launch_game_paths = None;
                         self.current_pak_file_idx = None;
                         self.table = None;
                         self.collect_pak_files();
@@ -882,14 +1294,47 @@ impl RepakModManager {
                         }
                     }
                 });
+                flex_ui.add_ui(item(), |ui| {
+                    let launch_check = self
+                        .launch_game_paths
+                        .get_or_insert_with(crate::launch_game::detect_game_launch_paths);
+                    let (launch_enabled, hover_text) = match &launch_check {
+                        Ok(paths) => (
+                            true,
+                            format!("Launch Marvel Rivals via Steam ({})", paths.paks_path.display()),
+                        ),
+                        Err(e) => (false, e.clone()),
+                    };
+
+                    let button = Button::new(RichText::new("Launch Game").color(Color32::WHITE))
+                        .fill(RED_THEME_COLOR)
+                        .stroke(Stroke::new(1.0, Color32::from_rgb(255, 86, 118)));
+                    let response = ui
+                        .add_enabled(launch_enabled, button)
+                        .on_hover_text(hover_text);
+
+                    if response.clicked() {
+                        match crate::launch_game::launch_detected_game() {
+                            Ok(()) => info!("Launch game requested"),
+                            Err(e) => {
+                                error!(error = %e, "Failed to launch game");
+                                rfd::MessageDialog::new()
+                                    .set_buttons(MessageButtons::Ok)
+                                    .set_title("Failed to launch game")
+                                    .set_description(e)
+                                    .show();
+                            }
+                        }
+                    }
+                });
             });
     }
 
     #[instrument(fields(pak_path = ?pak_path))]
-    fn delete_mod_files(pak_path: &PathBuf) -> std::io::Result<()> {
+    fn delete_mod_files(pak_path: &Path) -> std::io::Result<()> {
         let utoc_path = pak_path.with_extension("utoc");
         let ucas_path = pak_path.with_extension("ucas");
-        let files_to_delete = [pak_path.clone(), utoc_path, ucas_path];
+        let files_to_delete = [pak_path.to_path_buf(), utoc_path, ucas_path];
 
         info!("Deleting mod files");
 
@@ -1025,4 +1470,150 @@ fn normalize_mod_display_name(name: &str) -> String {
 
 fn has_mod_suffix(name: &str) -> bool {
     name.ends_with("_9999999_P") || name.ends_with("_999999_P")
+}
+
+fn detect_mod_category(files: &[String]) -> String {
+    if files.iter().any(|file| {
+        let name = Path::new(file)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        name.starts_with("sk_")
+    }) {
+        return "Mesh".to_string();
+    }
+
+    if files.iter().any(|file| file.contains("WwiseAudio")) {
+        return "Audio".to_string();
+    }
+
+    if files.iter().any(|file| {
+        file.strip_prefix("Marvel/Content/Marvel/")
+            .or_else(|| file.strip_prefix("/Game/Marvel/"))
+            .unwrap_or(file)
+            .starts_with("UI/")
+    }) {
+        return "UI".to_string();
+    }
+
+    if files.iter().any(|file| {
+        file.strip_prefix("Marvel/Content/Marvel/")
+            .or_else(|| file.strip_prefix("/Game/Marvel/"))
+            .unwrap_or(file)
+            .starts_with("Movies/")
+    }) {
+        return "Movies".to_string();
+    }
+
+    if files.iter().any(|file| {
+        file.strip_prefix("Marvel/Content/Marvel/")
+            .or_else(|| file.strip_prefix("/Game/Marvel/"))
+            .unwrap_or(file)
+            .starts_with("Characters/")
+    }) {
+        return "Texture".to_string();
+    }
+
+    "Other".to_string()
+}
+
+fn filter_label(prefix: &str, selected: &[String]) -> String {
+    match selected.len() {
+        0 => format!("{prefix}: All"),
+        1 => selected[0].clone(),
+        count => format!("{prefix}: {count}"),
+    }
+}
+
+fn toggle_filter_value(filters: &mut Vec<String>, value: String, selected: bool) {
+    if selected {
+        if !filters.contains(&value) {
+            filters.push(value);
+            filters.sort();
+        }
+    } else {
+        filters.retain(|existing| existing != &value);
+    }
+}
+
+fn category_colors(category: &str) -> (Color32, Color32, Color32) {
+    match category {
+        "Mesh" => rgb3((255, 213, 137), (80, 55, 28), (142, 96, 44)),
+        "Texture" => rgb3((147, 231, 207), (24, 67, 61), (45, 126, 113)),
+        "Audio" => rgb3((213, 181, 255), (60, 42, 90), (111, 78, 164)),
+        "UI" => rgb3((160, 203, 255), (31, 56, 88), (54, 105, 168)),
+        "Movies" => rgb3((255, 171, 198), (82, 37, 52), (151, 68, 94)),
+        _ => rgb3((210, 210, 210), (54, 54, 54), (86, 86, 86)),
+    }
+}
+
+fn tag_colors(tag: &str) -> (Color32, Color32, Color32) {
+    const PALETTE: [(Color32, Color32, Color32); 20] = [
+        rgb3((149, 214, 255), (25, 57, 78), (51, 113, 154)),
+        rgb3((170, 236, 182), (31, 67, 40), (59, 127, 75)),
+        rgb3((255, 207, 145), (77, 54, 26), (143, 99, 44)),
+        rgb3((230, 180, 255), (65, 42, 79), (122, 78, 150)),
+        rgb3((255, 174, 174), (78, 38, 38), (148, 70, 70)),
+        rgb3((147, 231, 207), (24, 67, 61), (45, 126, 113)),
+        rgb3((255, 181, 221), (78, 38, 61), (148, 70, 116)),
+        rgb3((225, 226, 149), (66, 67, 31), (125, 127, 58)),
+        rgb3((191, 219, 254), (30, 58, 138), (59, 130, 246)),
+        rgb3((196, 181, 253), (76, 29, 149), (139, 92, 246)),
+        rgb3((253, 186, 116), (124, 45, 18), (249, 115, 22)),
+        rgb3((252, 165, 165), (127, 29, 29), (239, 68, 68)),
+        rgb3((134, 239, 172), (20, 83, 45), (34, 197, 94)),
+        rgb3((103, 232, 249), (22, 78, 99), (6, 182, 212)),
+        rgb3((216, 180, 254), (88, 28, 135), (168, 85, 247)),
+        rgb3((253, 224, 71), (113, 63, 18), (234, 179, 8)),
+        rgb3((244, 114, 182), (131, 24, 67), (219, 39, 119)),
+        rgb3((163, 230, 53), (63, 98, 18), (132, 204, 22)),
+        rgb3((125, 211, 252), (12, 74, 110), (14, 165, 233)),
+        rgb3((251, 191, 36), (120, 53, 15), (245, 158, 11)),
+    ];
+
+    let hash = fnv1a(tag.as_bytes());
+    PALETTE[hash as usize % PALETTE.len()]
+}
+
+const fn rgb3(
+    bg: (u8, u8, u8),
+    text: (u8, u8, u8),
+    stroke: (u8, u8, u8),
+) -> (Color32, Color32, Color32) {
+    (
+        Color32::from_rgb(bg.0, bg.1, bg.2),
+        Color32::from_rgb(text.0, text.1, text.2),
+        Color32::from_rgb(stroke.0, stroke.1, stroke.2),
+    )
+}
+
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+
+    for byte in bytes {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+
+    hash
+}
+
+fn same_mod_identity(left: &Path, right: &Path) -> bool {
+    normalized_mod_identity(left) == normalized_mod_identity(right)
+}
+
+fn normalized_mod_identity(path: &Path) -> PathBuf {
+    let parent = path.parent().unwrap_or_else(|| Path::new(""));
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    let stem = file_name
+        .strip_suffix(".bak_repak")
+        .or_else(|| file_name.strip_suffix(".pak_disabled"))
+        .or_else(|| file_name.strip_suffix(".pak"))
+        .unwrap_or(file_name);
+
+    parent.join(stem)
 }

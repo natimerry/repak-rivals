@@ -19,8 +19,10 @@ fn show_contrib(ui: &mut egui::Ui, contributer: Contributer) {
         ui.colored_label(name_color, "- ");
         ui.hyperlink_to(contributer.name, &contributer.link);
 
-        let url_color = Color32::from_rgb(0,255, 255);
-        let link_text = RichText::new(format!("({})", contributer.platform)).color(url_color).strong();
+        let url_color = Color32::from_rgb(0, 255, 255);
+        let link_text = RichText::new(format!("({})", contributer.platform))
+            .color(url_color)
+            .strong();
         ui.hyperlink_to(link_text, &contributer.link);
     });
     ui.horizontal_wrapped(|ui| {

@@ -1,10 +1,19 @@
+use repak::PakReader;
+use retoc::{action_manifest, ActionManifest, Config, FGuid};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
-use repak::PakReader;
-use retoc::{action_manifest, ActionManifest, Config, FGuid};
 
-pub fn read_utoc(utoc_path: &Path, pak_reader: &PakReader, pak_path: &Path) -> Vec<crate::file_table::FileEntry> {
+const UTOC_MAGIC: &[u8; 16] = b"-==--==--==--==-";
+const CONTAINER_FLAGS_OFFSET: u64 = 80;
+const CONTAINER_FLAG_ENCRYPTED: u8 = 0b0010;
+
+pub fn read_utoc(
+    utoc_path: &Path,
+    pak_reader: &PakReader,
+    pak_path: &Path,
+) -> Vec<crate::file_table::FileEntry> {
     let action_mn = ActionManifest::new(PathBuf::from(utoc_path));
     let mut config = Config {
         container_header_version_override: None,
@@ -18,21 +27,56 @@ pub fn read_utoc(utoc_path: &Path, pak_reader: &PakReader, pak_path: &Path) -> V
     config.aes_keys.insert(FGuid::default(), aes_toc.clone());
     let config = Arc::new(config);
 
-    let ops = action_manifest(action_mn,config).expect("Failed to read utoc");
-    let ret = ops.oplog.entries.iter().map(|entry| {
-        let name = entry.packagestoreentry.packagename.clone();
-        crate::file_table::FileEntry {
-            file_path: name,
-            pak_path: PathBuf::from(pak_path),
-            pak_reader: pak_reader.clone(),
-            // entry: pak_reader.get_file_entry(entry).unwrap(),
-            compressed: "Unavailable".to_string(),
-            uncompressed: "Unavailable".to_string(),
-            offset: "Unavailable".to_string(),
-            bulkdata: Some(entry.bulkdata.len()),
-            package_data: Some(entry.packagedata.len()),
-        }
-    }).collect::<Vec<_>>();
+    let ops = action_manifest(action_mn, config).expect("Failed to read utoc");
+    let ret = ops
+        .oplog
+        .entries
+        .iter()
+        .map(|entry| {
+            let name = entry.packagestoreentry.packagename.clone();
+            crate::file_table::FileEntry {
+                file_path: name,
+                pak_path: PathBuf::from(pak_path),
+                pak_reader: pak_reader.clone(),
+                // entry: pak_reader.get_file_entry(entry).unwrap(),
+                compressed: "Unavailable".to_string(),
+                uncompressed: "Unavailable".to_string(),
+                offset: "Unavailable".to_string(),
+                bulkdata: Some(entry.bulkdata.len()),
+                package_data: Some(entry.packagedata.len()),
+            }
+        })
+        .collect::<Vec<_>>();
 
     ret
+}
+
+pub fn is_iostore_obfuscated(utoc_path: &Path) -> Result<bool, String> {
+    let mut file = std::fs::File::open(utoc_path)
+        .map_err(|e| format!("Failed to open {}: {e}", utoc_path.display()))?;
+
+    let mut magic = [0u8; 16];
+    file.read_exact(&mut magic).map_err(|e| {
+        format!(
+            "Failed to read .utoc magic from {}: {e}",
+            utoc_path.display()
+        )
+    })?;
+
+    if &magic != UTOC_MAGIC {
+        return Err(format!("Unrecognized .utoc file: {}", utoc_path.display()));
+    }
+
+    file.seek(SeekFrom::Start(CONTAINER_FLAGS_OFFSET))
+        .map_err(|e| format!("Failed to seek .utoc flags in {}: {e}", utoc_path.display()))?;
+
+    let mut flags = [0u8; 1];
+    file.read_exact(&mut flags).map_err(|e| {
+        format!(
+            "Failed to read .utoc flags from {}: {e}",
+            utoc_path.display()
+        )
+    })?;
+
+    Ok(flags[0] & CONTAINER_FLAG_ENCRYPTED != 0)
 }

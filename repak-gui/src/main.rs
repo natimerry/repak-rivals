@@ -2,6 +2,7 @@ extern crate core;
 
 mod file_table;
 mod install_mod;
+mod launch_game;
 mod main_ui;
 mod utils;
 
