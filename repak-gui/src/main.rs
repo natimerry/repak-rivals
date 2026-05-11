@@ -335,10 +335,19 @@ pub fn check_repak_rivals_version(current_version: &str) {
     let current_version = Version::parse(current_version).expect("invalid current version format");
 
     if current_version < latest_version {
-        panic!(
-            "repak-rivals is outdated: current={}, latest={}",
-            current_version, latest_version
-        );
+        rfd::MessageDialog::new()
+            .set_title("⚠️ Update Required")
+            .set_buttons(rfd::MessageButtons::Ok)
+            .set_description(format!(
+                "A new version of repak-rivals is available!\n\n\
+                Current version:  v{current_version}\n\
+                Latest version:   v{latest_version}\n\n\
+                Please download the latest release from:\n\
+                https://github.com/natimerry/repak-rivals/releases/latest\n\n\
+                The application will now exit."
+            ))
+            .show();
+        std::process::exit(1);
     }
 }
 

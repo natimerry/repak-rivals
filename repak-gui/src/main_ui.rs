@@ -571,6 +571,7 @@ impl RepakModManager {
                             Stroke::new(1.0, Color32::from_rgb(64, 64, 64))
                         };
 
+                        let mut toggler_clicked = false;
                         let row = egui::Frame::NONE
                             .fill(row_fill)
                             .stroke(row_stroke)
@@ -641,7 +642,7 @@ impl RepakModManager {
                                         let mut enabled = pak_enabled;
                                         let toggler = ui.add(ios_widget::toggle(&mut enabled));
                                         if toggler.clicked() {
-                                            println!("Clicked toggler");
+                                            toggler_clicked  = true;
                                             let toggled_path = pak_path.clone();
                                             let enable_mod = enabled;
                                             if let Some(new_path) =
@@ -668,25 +669,23 @@ impl RepakModManager {
                                 });
                             });
 
+                        let row_rect = row.response.rect;
+                        let clickable_rect = egui::Rect::from_min_max(
+                            row_rect.min,
+                            egui::pos2(row_rect.max.x - 70.0, row_rect.max.y),
+                        );
+
                         let row_response = ui
                             .interact(
-                                row.response.rect,
+                                clickable_rect,
                                 ui.make_persistent_id(("mod_row", raw_path.as_str())),
                                 egui::Sense::click(),
                             )
                             .on_hover_cursor(egui::CursorIcon::PointingHand)
                             .on_hover_text(format!("View files and details\n{}", raw_path));
 
-                        if row_response.hovered() && !is_selected {
-                            ui.painter().rect_stroke(
-                                row_response.rect,
-                                4,
-                                Stroke::new(1.0, Color32::from_rgb(94, 94, 94)),
-                                egui::StrokeKind::Outside,
-                            );
-                        }
 
-                        if row_response.clicked() {
+                        if row_response.clicked() && !toggler_clicked{
                             self.current_pak_file_idx = Some(i);
                             let pak_file = &self.pak_files[i];
                             self.table = Some(FileTable::new(&pak_file.reader, &pak_file.path));
