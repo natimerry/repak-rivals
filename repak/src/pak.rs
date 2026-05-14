@@ -339,7 +339,10 @@ fn root_path(mount_point: &str, path: &str) -> String {
             keep
         })
         .collect::<String>();
-    path.strip_prefix("../../../").unwrap().to_string()
+    path
+        .strip_prefix("../../../")
+        .unwrap_or(&path)
+        .to_string()
 }
 
 struct Data<'d>(Box<dyn AsRef<[u8]> + Send + Sync + 'd>);

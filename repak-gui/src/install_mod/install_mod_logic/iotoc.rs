@@ -7,7 +7,6 @@ use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::ParallelIterator;
 use repak::Version;
 use retoc::*;
-use walkdir::WalkDir;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::PathBuf;
@@ -15,6 +14,7 @@ use std::str::FromStr;
 use std::sync::atomic::AtomicI32;
 use std::sync::Arc;
 use tracing::{debug, info, instrument};
+use walkdir::WalkDir;
 
 const MOD_NAME_SUFFIX: &str = "_9999999_P";
 
@@ -161,11 +161,9 @@ pub fn to_legacy_uasset(
             let mut set = HashSet::new();
 
             ops.oplog.entries.iter().for_each(|entry| {
-                if let Some(stem) = std::path::Path::new(&entry.packagestoreentry.packagename)
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                {
-                    set.insert(stem.to_string());
+                let package_name = entry.packagestoreentry.packagename.trim();
+                if !package_name.is_empty() {
+                    set.insert(package_name.replace('\\', "/"));
                 }
             });
 

@@ -113,7 +113,7 @@ fn use_dark_red_accent(style: &mut Style) {
     style.visuals.text_cursor.stroke.color = Color32::from_hex("#941428").unwrap();
     style.visuals.selection = Selection {
         bg_fill: Color32::from_rgba_unmultiplied(241, 24, 14, 60),
-        stroke: Stroke::new(1.0, Color32::from_hex("#000000").unwrap()),
+        stroke: Stroke::new(1.0_f32, Color32::from_hex("#000000").unwrap()),
     };
 
     style.visuals.selection.bg_fill = Color32::from_rgba_unmultiplied(241, 24, 14, 60);
@@ -566,9 +566,9 @@ impl RepakModManager {
                             Color32::from_rgb(35, 35, 35)
                         };
                         let row_stroke = if is_selected {
-                            Stroke::new(1.0, RED_THEME_COLOR)
+                            Stroke::new(1.0_f32, RED_THEME_COLOR)
                         } else {
-                            Stroke::new(1.0, Color32::from_rgb(64, 64, 64))
+                            Stroke::new(1.0_f32, Color32::from_rgb(64, 64, 64))
                         };
 
                         let mut toggler_clicked = false;
@@ -710,7 +710,7 @@ impl RepakModManager {
     ) {
         egui::Frame::NONE
             .fill(fill)
-            .stroke(Stroke::new(1.0, stroke))
+            .stroke(Stroke::new(1.0_f32, stroke))
             .corner_radius(3)
             .inner_margin(egui::Margin::symmetric(5, 2))
             .show(ui, |ui| {
@@ -854,7 +854,7 @@ impl RepakModManager {
             });
             let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
                 .fill(Color32::from_rgb(186, 31, 59))
-                .stroke(Stroke::new(1.0, Color32::from_rgb(255, 70, 105)));
+                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(255, 70, 105)));
             if ui.add(create_button).clicked() {
                 let tag = self.new_tag_name.trim().to_string();
                 if !tag.is_empty() {
@@ -872,7 +872,7 @@ impl RepakModManager {
                 let (text_color, fill, stroke) = tag_colors(&tag);
                 let tag_button = Button::new(RichText::new(format!("#{tag}")).color(text_color))
                     .fill(fill)
-                    .stroke(Stroke::new(1.0, stroke));
+                    .stroke(Stroke::new(1.0_f32, stroke));
                 if ui.add(tag_button).clicked() {
                     self.add_tag_to_mod(mod_path, &tag);
                     if let Err(e) = self.save_state() {
@@ -1220,9 +1220,7 @@ impl RepakModManager {
 
             ui.menu_button("Settings", |ui| {
                 ui.label("Font Size: ");
-                ui.add(
-                    egui::Slider::new(&mut self.default_font_size, 12.0..=32.0),
-                );
+                ui.add(egui::Slider::new(&mut self.default_font_size, 12.0..=32.0));
                 set_custom_font_size(ui.ctx(), self.default_font_size);
                 ui.horizontal(|ui| {
                     ui.label("Show Load Order Suffix");
@@ -1313,7 +1311,7 @@ impl RepakModManager {
 
                     let button = Button::new(RichText::new("Launch Game").color(Color32::WHITE))
                         .fill(RED_THEME_COLOR)
-                        .stroke(Stroke::new(1.0, Color32::from_rgb(255, 86, 118)));
+                        .stroke(Stroke::new(1.0_f32, Color32::from_rgb(255, 86, 118)));
                     let response = ui
                         .add_enabled(launch_enabled, button)
                         .on_hover_text(hover_text);

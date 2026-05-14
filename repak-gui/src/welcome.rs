@@ -67,7 +67,7 @@ fn show_support_section(ui: &mut egui::Ui) {
 
     egui::Frame::group(ui.style())
         .fill(egui::Color32::from_rgb(30, 30, 30))
-        .stroke(egui::Stroke::new(1.0, egui::Color32::DARK_GRAY))
+        .stroke(egui::Stroke::new(1.0_f32, egui::Color32::DARK_GRAY))
         .corner_radius(egui::CornerRadius::same(12))
         .inner_margin(egui::Margin::same(12))
         .outer_margin(egui::Margin::same(8))
