@@ -107,6 +107,7 @@ struct ModEntry {
     enabled: bool,
     category: String,
     characteristic: String,
+    obfuscated: String,
 }
 fn use_dark_red_accent(style: &mut Style) {
     style.visuals.hyperlink_color = Color32::from_hex("#f71034").expect("Invalid color");
@@ -261,12 +262,26 @@ impl RepakModManager {
                 }
                 let pak = pak.unwrap();
                 let file_list = Self::files_for_category(&pak, path);
+                let mut utoc_path = path.to_path_buf();
+                utoc_path.set_extension("utoc");
+                let obfuscated = if utoc_path.exists() {
+                    match is_iostore_obfuscated(&utoc_path) {
+                        Ok(value) => value.to_string(),
+                        Err(e) => {
+                            warn!(path = %utoc_path.display(), error = %e, "Failed to read IoStore obfuscation flag");
+                            "Unknown".to_string()
+                        }
+                    }
+                } else {
+                    "false".to_string()
+                };
                 let entry = ModEntry {
                     reader: pak,
                     path: path.to_path_buf(),
                     enabled: !disabled,
                     category: detect_mod_category(&file_list),
                     characteristic: get_current_pak_characteristics(file_list),
+                    obfuscated,
                 };
                 vecs.push(entry);
             }
@@ -377,21 +392,8 @@ impl RepakModManager {
         };
         let pak = &current_mod.reader;
         let pak_path = current_mod.path.clone();
-
-        let full_paths = pak.files().into_iter().collect::<Vec<_>>();
-        let mut utoc_path = pak_path.to_path_buf();
-        utoc_path.set_extension("utoc");
-        let obfuscated = if utoc_path.exists() {
-            match is_iostore_obfuscated(&utoc_path) {
-                Ok(value) => value.to_string(),
-                Err(e) => {
-                    warn!(path = %utoc_path.display(), error = %e, "Failed to read IoStore obfuscation flag");
-                    "Unknown".to_string()
-                }
-            }
-        } else {
-            "false".to_string()
-        };
+        let obfuscated = current_mod.obfuscated.clone();
+        let characteristic = current_mod.characteristic.clone();
 
         egui::CollapsingHeader::new("Pak details")
             .default_open(true)
@@ -422,19 +424,7 @@ impl RepakModManager {
                     .strong()
                     .size(self.default_font_size + 1.),
             ));
-            let paths = {
-                if utoc_path.exists() {
-                    let file = read_utoc(&utoc_path, pak, &pak_path)
-                        .iter()
-                        .map(|entry| entry.file_path.clone())
-                        .collect::<Vec<_>>();
-                    file
-                } else {
-                    full_paths.clone()
-                }
-            };
-
-            ui.add(Label::new(get_current_pak_characteristics(paths)));
+            ui.add(Label::new(characteristic));
         });
         if self.table.is_none() {
             self.table = Some(FileTable::new(pak, &pak_path));

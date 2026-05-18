@@ -106,19 +106,22 @@ impl FileTable {
         ui.add_space(8.0);
 
         let search_query = self.search_query.trim().to_lowercase();
-        let filtered_indices: Vec<usize> = self
-            .file_contents
-            .iter()
-            .enumerate()
-            .filter(|(_, entry)| {
-                if search_query.is_empty() {
-                    return true;
-                }
-                let raw = entry.file_path.to_lowercase();
-                raw.contains(&search_query)
-            })
-            .map(|(idx, _)| idx)
-            .collect();
+        let filtered_indices: Option<Vec<usize>> = if search_query.is_empty() {
+            None
+        } else {
+            Some(
+                self.file_contents
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, entry)| entry.file_path.to_lowercase().contains(&search_query))
+                    .map(|(idx, _)| idx)
+                    .collect(),
+            )
+        };
+        let row_count = filtered_indices
+            .as_ref()
+            .map(|indices| indices.len())
+            .unwrap_or(self.file_contents.len());
 
         let available_height = ui.available_height();
         let mut table = TableBuilder::new(ui)
@@ -173,9 +176,12 @@ impl FileTable {
                 // });
             })
             .body(|body| {
-                body.rows(20.0, filtered_indices.len(), |mut row| {
+                body.rows(20.0, row_count, |mut row| {
                     let filtered_row_idx = row.index();
-                    let row_idx = filtered_indices[filtered_row_idx];
+                    let row_idx = filtered_indices
+                        .as_ref()
+                        .map(|indices| indices[filtered_row_idx])
+                        .unwrap_or(filtered_row_idx);
 
                     let entry = &mut self.file_contents[row_idx];
                     row.set_selected(self.selection == row_idx);
