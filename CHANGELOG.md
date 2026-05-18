@@ -3,6 +3,21 @@
 ## Changes:
 - No changes yet.
 
+# Version 3.1.0 (2026-05-18)
+
+This release focuses on Repak GUI responsiveness, install progress reporting, and release-build Windows launch behavior.
+
+## Changes:
+- Fix heavy GUI lag when large IoStore mods are present by avoiding expensive per-frame detail work.
+- Fix install progress so it is based on the total number of assets across all queued mods instead of completing after the first mod.
+- Add retoc logging hooks so normal To Zen installs report through app logging instead of spawning a console.
+- Keep explicit console progress for To Legacy conversions, where long-running work needs visible feedback.
+- Reduce noisy retoc material tag logs during normal GUI installs.
+- Fix release-build Windows folder opening by using native shell open behavior instead of fragile `explorer.exe` process handling.
+- Fix release-build game launching by opening the Steam protocol through the Windows shell, avoiding OS error 50 failures.
+- Fix To Legacy filter handling and clean up related Rust warnings.
+- Improve mod list/file table performance for large mods.
+
 # Version 2.11.4 (2026-04-05)
 
 - Fix `character_data.json` parsing from markdown files

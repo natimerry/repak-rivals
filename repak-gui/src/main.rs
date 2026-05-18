@@ -506,12 +506,12 @@ fn main() {
             let installable_mods = map_to_mods_internal(&paths);
             for (i, installable) in installable_mods.iter().enumerate() {
                 let mod_dir = paths[i].parent().unwrap();
-                let count = AtomicI32::new(0);
+                let count = Arc::new(AtomicI32::new(0));
                 convert_directory_to_iostore(
                     &installable,
                     mod_dir.to_path_buf(),
                     paths[i].clone(),
-                    &count,
+                    count,
                 )
                 .expect("Failed to convert directory");
             }

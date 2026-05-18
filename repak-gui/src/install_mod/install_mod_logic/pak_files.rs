@@ -11,7 +11,8 @@ use std::fs;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicI32;
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::Arc;
 use tempfile::tempdir;
 
 use super::iotoc::convert_directory_to_iostore;
@@ -81,7 +82,7 @@ pub fn extract_pak_to_dir(pak: &InstallableMod, install_dir: PathBuf) -> Result<
             .unwrap()
             .write_all(&buffer)
             .unwrap();
-        log::info!("Unpacked: {:?}", entry.out_path);
+        // log::info!("Unpacked: {:?}", entry.out_path);
     });
     Ok(())
 }
@@ -89,7 +90,7 @@ pub fn extract_pak_to_dir(pak: &InstallableMod, install_dir: PathBuf) -> Result<
 pub fn create_repak_from_pak(
     pak: &InstallableMod,
     mod_dir: PathBuf,
-    packed_files_count: &AtomicI32,
+    packed_files_count: Arc<AtomicI32>,
 ) -> Result<(), repak::Error> {
     // extract the pak first into a temporary dir
     let temp_dir = tempdir().map_err(repak::Error::Io)?;
@@ -113,6 +114,7 @@ pub fn repak_dir(
     mod_dir: PathBuf,
     installed_mods_ptr: &AtomicI32,
 ) -> Result<(), repak::Error> {
+    let base_progress = installed_mods_ptr.load(Ordering::SeqCst);
     let mut pak_name = ensure_mod_name_suffix(&pak.mod_name);
     pak_name.push_str(".pak");
     let output_file = File::create(mod_dir.join(pak_name))?;
@@ -158,7 +160,6 @@ pub fn repak_dir(
     for (path, entry) in partial_entry {
         debug!("Writing: {}", path);
         pak_writer.write_entry(path.clone(), entry)?;
-        installed_mods_ptr.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         rel_paths.push(path);
     }
 
@@ -172,5 +173,8 @@ pub fn repak_dir(
     pak_writer.write_index()?;
 
     log::info!("Wrote pak file successfully");
+    let minimum_progress = base_progress
+        .saturating_add(pak.total_files.max(1).min(i32::MAX as usize) as i32);
+    installed_mods_ptr.fetch_max(minimum_progress, Ordering::SeqCst);
     Ok::<(), repak::Error>(())
 }

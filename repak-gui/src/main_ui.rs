@@ -1265,17 +1265,16 @@ impl RepakModManager {
                         info!(path = %self.game_path.to_string_lossy(), "Opening mod folder");
                         #[cfg(target_os = "windows")]
                         {
-                            let process = std::process::Command::new("explorer.exe")
-                                .arg(self.game_path.clone())
-                                .spawn();
-
-                            if let Err(e) = process {
-                                error!("Failed to open folder: {}", e);
-                                return;
+                            if let Err(e) = crate::launch_game::shell_open_path(&self.game_path) {
+                                error!(error = %e, path = %self.game_path.display(), "Failed to open folder");
+                                rfd::MessageDialog::new()
+                                    .set_buttons(MessageButtons::Ok)
+                                    .set_title("Failed to open mod folder")
+                                    .set_description(e)
+                                    .show();
                             } else {
-                                info!("Opened mod folder: {}", self.game_path.to_string_lossy());
+                                info!(path = %self.game_path.display(), "Opened mod folder");
                             }
-                            process.unwrap().wait().unwrap();
                         }
 
                         #[cfg(target_os = "linux")]

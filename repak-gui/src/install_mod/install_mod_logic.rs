@@ -8,6 +8,7 @@ use iotoc::convert_directory_to_iostore;
 use pak_files::create_repak_from_pak;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::Arc;
 use tracing::{error, info, instrument, warn};
 
 const MOD_NAME_SUFFIX: &str = "_9999999_P";
@@ -24,7 +25,7 @@ pub(crate) fn ensure_mod_name_suffix(name: &str) -> String {
 pub fn install_mods_in_viewport(
     mods: &mut [InstallableMod],
     mod_directory: &Path,
-    installed_mods_ptr: &AtomicI32,
+    installed_mods_ptr: Arc<AtomicI32>,
     stop_thread: &AtomicBool,
     chunkdir: &Option<PathBuf>,
 ) {
@@ -78,6 +79,10 @@ pub fn install_mods_in_viewport(
                     error!(?file, error = ?e, "Unable to copy file");
                 }
             }
+            installed_mods_ptr.fetch_add(
+                installable_mod.total_files.max(1).min(i32::MAX as usize) as i32,
+                Ordering::SeqCst,
+            );
             continue;
             // }
         }
@@ -87,7 +92,7 @@ pub fn install_mods_in_viewport(
             if let Err(e) = create_repak_from_pak(
                 installable_mod,
                 PathBuf::from(mod_directory),
-                installed_mods_ptr,
+                installed_mods_ptr.clone(),
             ) {
                 error!(mod_name = %installable_mod.mod_name, error = %e, "Failed to create repak from pak");
             }
@@ -106,7 +111,10 @@ pub fn install_mods_in_viewport(
                 mod_directory.join(format!("{normalized_mod_name}.pak")),
             )
             .unwrap();
-            installed_mods_ptr.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            installed_mods_ptr.fetch_add(
+                installable_mod.total_files.max(1).min(i32::MAX as usize) as i32,
+                Ordering::SeqCst,
+            );
             continue;
         }
 
@@ -115,7 +123,7 @@ pub fn install_mods_in_viewport(
                 installable_mod,
                 PathBuf::from(&mod_directory),
                 PathBuf::from(&installable_mod.mod_path),
-                installed_mods_ptr,
+                installed_mods_ptr.clone(),
             );
             if let Err(e) = res {
                 error!(mod_name = %installable_mod.mod_name, mod_path = ?installable_mod.mod_path, error = %e, "Failed to convert directory");
@@ -125,6 +133,6 @@ pub fn install_mods_in_viewport(
         }
     }
     // set i32 to -255 magic value to indicate mod installation is done
-    AtomicI32::store(installed_mods_ptr, -255, Ordering::SeqCst);
+    AtomicI32::store(&installed_mods_ptr, -255, Ordering::SeqCst);
     info!("Install worker finished");
 }

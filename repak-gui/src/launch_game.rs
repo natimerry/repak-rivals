@@ -155,25 +155,10 @@ fn wait_for_game_start() {
 fn launch_via_steam() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-        Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-WindowStyle",
-                "Hidden",
-                "-Command",
-                &format!("Start-Process -FilePath '{}'", STEAM_APP_URL),
-            ])
-            .env("__COMPAT_LAYER", "RUNASINVOKER")
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn()
-            .map_err(|e| {
-                error!(error = %e, "Failed to launch Steam URL");
-                format!("Failed to launch game. Please ensure Steam is installed. Error: {e}")
-            })?;
+        shell_open_url(STEAM_APP_URL).map_err(|e| {
+            error!(error = %e, "Failed to launch Steam URL");
+            format!("Failed to launch game. Please ensure Steam is installed. Error: {e}")
+        })?;
     }
 
     #[cfg(target_os = "macos")]
@@ -194,6 +179,87 @@ fn launch_via_steam() -> Result<(), String> {
 
     info!("Steam launch URL dispatched");
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn shell_open_path(path: &Path) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+
+    let target = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<u16>>();
+    shell_execute_open(&target)
+}
+
+#[cfg(target_os = "windows")]
+fn shell_open_url(url: &str) -> Result<(), String> {
+    let target = url
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<u16>>();
+    shell_execute_open(&target)
+}
+
+#[cfg(target_os = "windows")]
+fn shell_execute_open(target: &[u16]) -> Result<(), String> {
+    use core::ffi::c_void;
+
+    #[link(name = "shell32")]
+    extern "system" {
+        fn ShellExecuteW(
+            hwnd: *mut c_void,
+            lp_operation: *const u16,
+            lp_file: *const u16,
+            lp_parameters: *const u16,
+            lp_directory: *const u16,
+            n_show_cmd: i32,
+        ) -> isize;
+    }
+
+    const SW_SHOWNORMAL: i32 = 1;
+    let operation = "open"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<u16>>();
+
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            target.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+
+    if result > 32 {
+        Ok(())
+    } else {
+        Err(shell_execute_error_message(result))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn shell_execute_error_message(code: isize) -> String {
+    let reason = match code {
+        0 => "out of memory or resources",
+        2 => "file was not found",
+        3 => "path was not found",
+        5 => "access denied",
+        8 => "not enough memory",
+        26 => "sharing violation",
+        27 => "file association is incomplete or invalid",
+        28 => "DDE transaction timed out",
+        29 => "DDE transaction failed",
+        30 => "DDE transaction busy",
+        31 => "no application is associated with this file or protocol",
+        32 => "DLL was not found",
+        _ => "unknown ShellExecuteW error",
+    };
+    format!("ShellExecuteW failed with code {code}: {reason}")
 }
 
 fn is_game_process_running() -> bool {

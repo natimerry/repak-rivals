@@ -93,6 +93,14 @@ impl Default for InstallableMod {
     }
 }
 
+fn processable_asset_count<'a>(paths: impl IntoIterator<Item = &'a str>) -> usize {
+    paths
+        .into_iter()
+        .filter(|path| path.to_ascii_lowercase().ends_with(".uasset"))
+        .count()
+        .max(1)
+}
+
 #[derive(Debug)]
 pub struct ModInstallRequest {
     pub(crate) mods: Vec<InstallableMod>,
@@ -111,7 +119,12 @@ impl ModInstallRequest {
         mod_directory: PathBuf,
         chunkdir: &Option<PathBuf>,
     ) -> Self {
-        let len = mods.iter().map(|m| m.total_files).sum::<usize>();
+        let len = mods
+            .iter()
+            .filter(|m| m.enabled)
+            .map(|m| m.total_files)
+            .sum::<usize>()
+            .max(1);
         info!("Created install request");
         let chunkdir = chunkdir.clone();
         Self {
@@ -186,6 +199,13 @@ impl ModInstallRequest {
                                     info!("Starting install worker");
                                     spawn_install_terminal();
                                     let mut mods = self.mods.to_vec(); // clone
+                                    self.total_mods = mods
+                                        .iter()
+                                        .filter(|m| m.enabled)
+                                        .map(|m| m.total_files)
+                                        .sum::<usize>()
+                                        .max(1) as f32;
+                                    self.installed_mods_cbk.store(0, SeqCst);
 
                                     let dir = self.mod_directory.clone();
                                     let new_atomic = self.installed_mods_cbk.clone();
@@ -195,7 +215,7 @@ impl ModInstallRequest {
                                         install_mods_in_viewport(
                                             &mut mods,
                                             &dir,
-                                            &new_atomic,
+                                            new_atomic,
                                             &new_stop_thread,
                                             &chunkdir,
                                         );
@@ -208,13 +228,22 @@ impl ModInstallRequest {
                         let installed = self
                             .installed_mods_cbk
                             .load(std::sync::atomic::Ordering::SeqCst);
-                        let mut percentage = installed as f32 / total_mods;
+                        let mut percentage = if total_mods > 0.0 {
+                            installed.max(0) as f32 / total_mods
+                        } else {
+                            0.0
+                        };
+                        percentage = percentage.clamp(0.0, 1.0);
                         if installed == -255 {
                             percentage = 1.0;
                         }
                         ui.add(
                             egui::ProgressBar::new(percentage)
-                                .text("Installing mods...")
+                                .text(format!(
+                                    "Installing assets... {}/{}",
+                                    installed.max(0),
+                                    total_mods as i32
+                                ))
                                 .animate(self.animate)
                                 .show_percentage(),
                         );
@@ -424,14 +453,14 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                         .iter()
                         .map(|x| x.file_path.clone())
                         .collect::<Vec<_>>();
-                    len = files.len();
+                    len = processable_asset_count(files.iter().map(String::as_str));
                     modtype = get_current_pak_characteristics(files);
                     iostore = true;
                 }
                 // IF ONLY PAK IS FOUND WE NEED TO EXTRACT AND INSTALL THE PAK
                 else if pak_path.exists() {
                     let files = builder.files();
-                    len = files.len();
+                    len = processable_asset_count(files.iter().map(String::as_str));
                     modtype = get_current_pak_characteristics(files);
                 }
 
@@ -485,8 +514,9 @@ pub fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
                 match builder {
                     Ok(builder) => {
                         pak = Some(builder.clone());
-                        modtype = get_current_pak_characteristics(builder.files());
-                        len = builder.files().len();
+                        let files = builder.files();
+                        len = processable_asset_count(files.iter().map(String::as_str));
+                        modtype = get_current_pak_characteristics(files);
                     }
                     Err(e) => {
                         error!(?path, error = %e, "Error reading pak file");
@@ -503,7 +533,7 @@ pub fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
                     .iter()
                     .map(|s| s.to_str().unwrap().to_string())
                     .collect::<Vec<_>>();
-                len = files.len();
+                len = processable_asset_count(files.iter().map(String::as_str));
                 modtype = get_current_pak_characteristics(files);
             }
 
@@ -550,7 +580,7 @@ pub fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
 
     installable_mods.extend(extensible_vec);
 
-    debug!("Mapped installable mods: {:?}", installable_mods);
+    // debug!("Mapped installable mods: {:?}", installable_mods);
     installable_mods
 }
 
