@@ -279,22 +279,6 @@ jobs:
         run: |
           # Write and read notes from a file to avoid quoting breaking things
           echo "$ANNOUNCEMENT_BODY" > $RUNNER_TEMP/notes.txt
-          VERSION="${{ needs.plan.outputs.tag }}"
-          VERSION="${VERSION#v}"
-          awk -v version="$VERSION" '
-            BEGIN { in_section = 0; found = 0 }
-            $0 ~ "^#+[[:space:]]*(\\[[vV]?" version "\\]|[vV]?" version "|Version[[:space:]]+[vV]?" version ")([[:space:]]|$)" {
-              in_section = 1
-              found = 1
-              next
-            }
-            in_section && $0 ~ "^#+[[:space:]]+" { exit }
-            in_section { print }
-            END { if (!found) exit 1 }
-          ' CHANGELOG.md > $RUNNER_TEMP/changelog-notes.txt || true
-          if [ -s "$RUNNER_TEMP/changelog-notes.txt" ]; then
-            cp "$RUNNER_TEMP/changelog-notes.txt" "$RUNNER_TEMP/notes.txt"
-          fi
 
           gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
 
