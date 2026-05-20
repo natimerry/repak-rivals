@@ -7,9 +7,10 @@ use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::ParallelIterator;
 use repak::Version;
 use retoc::*;
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::BufWriter;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
@@ -49,6 +50,134 @@ fn ensure_mod_name_suffix(name: &str) -> String {
     } else {
         format!("{name}{MOD_NAME_SUFFIX}")
     }
+}
+
+fn resolve_package_filter_path(package_name: &str) -> Option<String> {
+    let package_name = package_name.trim().replace('\\', "/");
+    if package_name.is_empty() {
+        return None;
+    }
+
+    if package_name.starts_with("../../../") {
+        return Some(package_name);
+    }
+
+    if let Some(rest) = package_name.strip_prefix("/Game/") {
+        return Some(format!("../../../Marvel/Content/{rest}"));
+    }
+
+    if package_name == "/Game" {
+        return Some("../../../Marvel/Content".to_string());
+    }
+
+    if let Some(rest) = package_name.strip_prefix("/Engine/") {
+        return Some(format!("../../../Engine/Content/{rest}"));
+    }
+
+    if package_name == "/Engine" {
+        return Some("../../../Engine/Content".to_string());
+    }
+
+    Some(package_name.trim_start_matches('/').to_string())
+}
+
+fn build_to_legacy_filter(utoc_path: PathBuf, config: Arc<retoc::Config>) -> Vec<String> {
+    action_manifest(ActionManifest::new(utoc_path), config)
+        .map(|ops| {
+            let mut set = HashSet::new();
+
+            for entry in &ops.oplog.entries {
+                let package_name = entry.packagestoreentry.packagename.trim();
+                if let Some(filter_path) = resolve_package_filter_path(package_name) {
+                    set.insert(filter_path);
+                }
+            }
+
+            set.into_iter().collect()
+        })
+        .unwrap_or_default()
+}
+
+fn to_legacy_config() -> Result<Arc<retoc::Config>, repak::Error> {
+    let mut config = retoc::Config {
+        container_header_version_override: None,
+        ..Default::default()
+    };
+    let aes_toc =
+        retoc::AesKey::from_str("0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74")
+            .map_err(|e| {
+                repak::Error::Io(std::io::Error::other(format!(
+                    "Failed to parse AES key: {e}"
+                )))
+            })?;
+    config.aes_keys.insert(retoc::FGuid::default(), aes_toc);
+    Ok(Arc::new(config))
+}
+
+fn hardlink_iostore_container(src_utoc: &Path, dst_dir: &Path) -> Result<(), repak::Error> {
+    let stem = src_utoc
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .ok_or_else(|| {
+            repak::Error::Io(std::io::Error::other(format!(
+                "Invalid IoStore container filename: {}",
+                src_utoc.display()
+            )))
+        })?;
+
+    for ext in ["utoc", "ucas"] {
+        let src = src_utoc.with_extension(ext);
+        if !src.exists() {
+            continue;
+        }
+        let dst = dst_dir.join(format!("{stem}.{ext}"));
+        std::fs::hard_link(&src, &dst).map_err(|e| {
+            repak::Error::Io(std::io::Error::other(format!(
+                "Failed to hardlink {} to {}: {e}",
+                src.display(),
+                dst.display()
+            )))
+        })?;
+    }
+
+    Ok(())
+}
+
+fn should_open_fast_game_container(path: &Path) -> bool {
+    let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+        return false;
+    };
+    let stem_lower = stem.to_ascii_lowercase();
+    stem_lower == "global"
+        // || (stem_lower.starts_with("pakchunk") && stem_lower.contains("character"))
+}
+
+fn prepare_fast_to_legacy_input(
+    selected_utoc: &Path,
+    mods_dir: &Path,
+    game_paks_dir: &Path,
+) -> Result<tempfile::TempDir, repak::Error> {
+    let temp_dir = tempfile::tempdir_in(game_paks_dir).map_err(repak::Error::Io)?;
+    let temp_path = temp_dir.path();
+
+    if !selected_utoc.starts_with(mods_dir) {
+        return Err(repak::Error::Io(std::io::Error::other(format!(
+            "Selected IoStore container is outside mods directory: {}",
+            selected_utoc.display()
+        ))));
+    }
+    hardlink_iostore_container(selected_utoc, temp_path)?;
+
+    for entry in std::fs::read_dir(game_paks_dir).map_err(repak::Error::Io)? {
+        let path = entry.map_err(repak::Error::Io)?.path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("utoc")
+            && should_open_fast_game_container(&path)
+        {
+            hardlink_iostore_container(&path, temp_path)?;
+        }
+    }
+
+    Ok(temp_dir)
 }
 
 pub fn convert_directory_to_iostore(
@@ -96,10 +225,13 @@ pub fn convert_directory_to_iostore(
         ..Default::default()
     };
 
-    let aes_toc = retoc::AesKey::from_str(
-        "0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74",
-    )
-    .map_err(|e| repak::Error::Io(std::io::Error::other(format!("Failed to parse AES key: {e}"))))?;
+    let aes_toc =
+        retoc::AesKey::from_str("0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74")
+            .map_err(|e| {
+                repak::Error::Io(std::io::Error::other(format!(
+                    "Failed to parse AES key: {e}"
+                )))
+            })?;
 
     config.aes_keys.insert(FGuid::default(), aes_toc.clone());
     let config = Arc::new(config);
@@ -111,8 +243,11 @@ pub fn convert_directory_to_iostore(
         mod_assets: pak.total_files.max(1).min(i32::MAX as usize) as i32,
         max_position: AtomicI32::new(0),
     }));
-    action_to_zen(action, config)
-        .map_err(|e| repak::Error::Io(std::io::Error::other(format!("Failed to convert to Zen: {e}"))))?;
+    action_to_zen(action, config).map_err(|e| {
+        repak::Error::Io(std::io::Error::other(format!(
+            "Failed to convert to Zen: {e}"
+        )))
+    })?;
 
     // NOW WE CREATE THE FAKE PAK FILE WITH THE CONTENTS BEING A TEXT FILE LISTING ALL CHUNKNAMES
 
@@ -157,14 +292,18 @@ pub fn convert_directory_to_iostore(
     let rel_paths_bytes: Vec<u8> = rel_paths.join("\n").into_bytes();
     let entry = entry_builder
         .build_entry(true, rel_paths_bytes, "chunknames")
-        .map_err(|e| repak::Error::Io(std::io::Error::other(format!("Failed to build chunknames entry: {e}"))))?;
+        .map_err(|e| {
+            repak::Error::Io(std::io::Error::other(format!(
+                "Failed to build chunknames entry: {e}"
+            )))
+        })?;
 
     pak_writer.write_entry("chunknames".to_string(), entry)?;
     pak_writer.write_index()?;
 
     log::info!("Wrote pak file successfully");
-    let minimum_progress = base_progress
-        .saturating_add(pak.total_files.max(1).min(i32::MAX as usize) as i32);
+    let minimum_progress =
+        base_progress.saturating_add(pak.total_files.max(1).min(i32::MAX as usize) as i32);
     let current_progress = packed_files_count.load(Ordering::SeqCst);
     if current_progress < minimum_progress {
         packed_files_count.store(minimum_progress, Ordering::SeqCst);
@@ -174,8 +313,6 @@ pub fn convert_directory_to_iostore(
     // now generate the fake pak file
 }
 
-
-
 #[instrument(skip_all)]
 pub fn to_legacy_uasset(
     pak: PathBuf,
@@ -184,9 +321,12 @@ pub fn to_legacy_uasset(
     _packed_files_count: &AtomicI32,
 ) -> Result<(), repak::Error> {
     retoc::reset_log_provider_to_stdout();
-    println!("Starting to-legacy conversion for {}", pak.display());
-    println!("Output directory: {}", output_dir.display());
-    println!("Temporary game Paks directory: {}", game_paks_dir.display());
+    info!(
+        pak = %pak.display(),
+        output_dir = %output_dir.display(),
+        game_paks_dir = %game_paks_dir.display(),
+        "Starting to-legacy conversion"
+    );
 
     let temp_dir = tempfile::tempdir().map_err(repak::Error::Io)?;
     let temp_path = temp_dir.path().to_path_buf();
@@ -207,7 +347,7 @@ pub fn to_legacy_uasset(
         let src = pak.with_extension(ext);
         let dst = game_paks_dir.join(format!("{}.{}", mod_stem, ext));
         if src.exists() {
-            println!("Copying {} to {}", src.display(), dst.display());
+            debug!(src = %src.display(), dst = %dst.display(), "Copying mod companion into game Paks");
             std::fs::copy(&src, &dst).map_err(repak::Error::Io)?;
             copied_files.push(dst);
         }
@@ -215,45 +355,19 @@ pub fn to_legacy_uasset(
 
     // Build filter list
     let utoc_path = pak.with_extension("utoc");
-    let action_mn = ActionManifest::new(utoc_path.clone());
-    let mut config = retoc::Config {
-        container_header_version_override: None,
-        ..Default::default()
-    };
-    let aes_toc = retoc::AesKey::from_str(
-        "0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74",
-    )
-    .map_err(|e| repak::Error::Io(std::io::Error::other(format!("Failed to parse AES key: {e}"))))?;
-    config.aes_keys.insert(retoc::FGuid::default(), aes_toc);
-    let config = Arc::new(config);
-
-    use std::collections::HashSet;
-
-    let filter: Vec<String> = action_manifest(action_mn, config.clone())
-        .map(|ops| {
-            let mut set = HashSet::new();
-
-            ops.oplog.entries.iter().for_each(|entry| {
-                let package_name = entry.packagestoreentry.packagename.trim();
-                if !package_name.is_empty() {
-                    set.insert(package_name.replace('\\', "/"));
-                }
-            });
-
-            set.into_iter().collect()
-        })
-        .unwrap_or_default();
-    println!("Prepared to-legacy filter with {} packages", filter.len());
+    let config = to_legacy_config()?;
+    let filter = build_to_legacy_filter(utoc_path, config.clone());
+    info!(package_count = filter.len(), "Prepared to-legacy filter");
 
     let legacy_output_dir = temp_path.join(mod_stem);
     std::fs::create_dir_all(&legacy_output_dir).map_err(repak::Error::Io)?;
-    println!("Extracting legacy assets into {}", legacy_output_dir.display());
+    debug!(legacy_output_dir = %legacy_output_dir.display(), "Extracting legacy assets");
 
     let games_pak_dir_clone = game_paks_dir.clone();
     let legacy_output_dir_clone = legacy_output_dir.clone();
 
     let result = std::thread::spawn(move || {
-        println!("retoc to-legacy started. This can take several minutes for large mods.");
+        info!("retoc to-legacy started");
         retoc::action_to_legacy(
             ActionToLegacy {
                 input: games_pak_dir_clone,
@@ -276,7 +390,7 @@ pub fn to_legacy_uasset(
     .map_err(|e| repak::Error::Io(std::io::Error::other(e.to_string())));
 
     // Copy extracted files from temp legacy dir to the actual output dir
-    println!("Copying converted files into final output...");
+    debug!("Copying converted files into final output...");
     for entry in WalkDir::new(&legacy_output_dir)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -298,15 +412,84 @@ pub fn to_legacy_uasset(
     }
 
     for dst in copied_files {
-        println!("Cleaning copied game file {}", dst.display());
+        debug!("Cleaning copied game file {}", dst.display());
         let _ = std::fs::remove_file(dst);
     }
 
     result?;
-    println!("to-legacy conversion complete.");
     info!(
         "Installing mod from {:#?} into {:#?}",
         &legacy_output_dir, &output_dir
     );
     return Ok(());
+}
+
+#[instrument(skip_all)]
+pub fn to_legacy_uasset_fast(
+    pak: PathBuf,
+    output_dir: PathBuf,
+    mods_dir: PathBuf,
+    game_paks_dir: PathBuf,
+) -> Result<(), repak::Error> {
+    info!(
+        pak = %pak.display(),
+        output_dir = %output_dir.display(),
+        mods_dir = %mods_dir.display(),
+        game_paks_dir = %game_paks_dir.display(),
+        "Starting fast to-legacy conversion"
+    );
+
+    let mod_stem = pak
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .ok_or_else(|| {
+            repak::Error::Io(std::io::Error::other(format!(
+                "Invalid mod filename for fast to-legacy conversion: {}",
+                pak.display()
+            )))
+        })?
+        .to_string();
+
+    let config = to_legacy_config()?;
+    let filter = build_to_legacy_filter(pak.with_extension("utoc"), config.clone());
+    info!(package_count = filter.len(), "Prepared fast to-legacy filter");
+
+    let input_dir =
+        prepare_fast_to_legacy_input(&pak.with_extension("utoc"), &mods_dir, &game_paks_dir)?;
+    let legacy_output_dir = output_dir.join(mod_stem);
+    std::fs::create_dir_all(&legacy_output_dir).map_err(repak::Error::Io)?;
+
+    std::thread::spawn({
+        let input_dir = input_dir.path().to_path_buf();
+        let legacy_output_dir = legacy_output_dir.clone();
+        move || {
+            info!("retoc fast to-legacy started");
+            retoc::action_to_legacy(
+                ActionToLegacy {
+                    input: input_dir,
+                    output: legacy_output_dir,
+                    filter,
+                    no_assets: false,
+                    no_shaders: false,
+                    no_compres_shaders: true,
+                    dry_run: false,
+                    version: None,
+                    verbose: true,
+                    debug: false,
+                    no_parallel: false,
+                },
+                config,
+            )
+        }
+    })
+    .join()
+    .map_err(|_| {
+        repak::Error::Io(std::io::Error::other(
+            "retoc fast to-legacy thread panicked",
+        ))
+    })?
+    .map_err(|e| repak::Error::Io(std::io::Error::other(e.to_string())))?;
+
+    info!("fast to-legacy conversion complete");
+    Ok(())
 }

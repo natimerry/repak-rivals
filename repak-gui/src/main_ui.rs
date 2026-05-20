@@ -3,7 +3,7 @@ extern crate core;
 use crate::file_table::FileTable;
 #[cfg(windows)]
 use crate::free_console;
-use crate::install_mod::install_mod_logic::iotoc::to_legacy_uasset;
+use crate::install_mod::install_mod_logic::iotoc::{to_legacy_uasset, to_legacy_uasset_fast};
 use crate::install_mod::{
     self, map_dropped_file_to_mods, map_paths_to_mods, InstallableMod, ModInstallRequest, AES_KEY,
 };
@@ -22,7 +22,6 @@ use install_mod::install_mod_logic::pak_files::extract_pak_to_dir;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use path_clean::PathClean;
 use repak::PakReader;
-use retoc::ActionUnpack;
 use rfd::{FileDialog, MessageButtons};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -30,7 +29,6 @@ use std::fs;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
@@ -1022,36 +1020,18 @@ impl RepakModManager {
                 utoc_path.set_extension("utoc");
 
                 if utoc_path.exists() {
-                    info!("Extracting as utoc...");
-                    let action: ActionUnpack = ActionUnpack {
-                        utoc: PathBuf::from(&utoc_path),
-                        output: to_create,
-                        verbose: true,
+                    let Some(game_chunk_path) = self.game_chunk_path.clone() else {
+                        warn!("Cannot convert IoStore mod to legacy without a detected game chunk path");
+                        return;
                     };
 
-                    let mut config = retoc::Config {
-                        container_header_version_override: None,
-                        ..Default::default()
-                    };
-
-                    let aes_toc = retoc::AesKey::from_str(
-                        "0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74",
-                    );
-                    let aes_toc = match aes_toc {
-                        Ok(key) => key,
-                        Err(e) => {
-                            error!(error = %e, "Failed to parse AES key for IoStore extraction");
-                            return;
-                        }
-                    };
-
-                    config
-                        .aes_keys
-                        .insert(retoc::FGuid::default(), aes_toc.clone());
-                    let config = std::sync::Arc::new(config);
-
-                    if let Err(e) = retoc::action_unpack(action, config) {
-                        error!(error = %e, "Failed to extract IoStore mod");
+                    if let Err(e) = to_legacy_uasset_fast(
+                        pak_path.to_path_buf(),
+                        dir,
+                        self.game_path.clone(),
+                        game_chunk_path,
+                    ) {
+                        error!(error = %e, "Failed to fast-convert IoStore mod to legacy asset");
                     }
                 } else {
                     let reader = match Self::open_pak_reader(pak_path) {
@@ -1251,9 +1231,6 @@ impl RepakModManager {
         let mut path = dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("repak_manager");
-
-
-
         if !path.exists() {
             if let Err(e) = fs::create_dir_all(&path) {
                 warn!(
