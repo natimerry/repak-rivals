@@ -1,3 +1,5 @@
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 extern crate core;
 
 mod file_table;
@@ -51,6 +53,7 @@ const ICON: LazyCell<Arc<IconData>> = LazyCell::new(|| {
 });
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 fn free_console() -> bool {
     #[cfg(not(debug_assertions))]
     {
@@ -58,6 +61,17 @@ fn free_console() -> bool {
             return false;
         }
         CONSOLE_READY.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    unsafe { FreeConsole() != 0 }
+}
+
+#[cfg(target_os = "windows")]
+fn detach_startup_console() -> bool {
+    #[cfg(not(debug_assertions))]
+    {
+        CONSOLE_READY.store(false, std::sync::atomic::Ordering::SeqCst);
+        CONSOLE_ALLOCATED_BY_US.store(false, std::sync::atomic::Ordering::SeqCst);
     }
 
     unsafe { FreeConsole() != 0 }
@@ -505,6 +519,8 @@ fn run_fix_kawaii_physics_cli() -> Result<(), String> {
 
 fn main() {
     let args = args().collect::<Vec<String>>();
+    #[cfg(all(windows, not(debug_assertions)))]
+    let has_cli_args = args.len() > 1;
     #[cfg(not(debug_assertions))]
     let fix_kawaii_physics_cli = args
         .get(1)
@@ -513,7 +529,11 @@ fn main() {
 
     #[cfg(target_os = "windows")]
     if !is_console() {
-        free_console();
+        detach_startup_console();
+    }
+    #[cfg(all(windows, not(debug_assertions)))]
+    if has_cli_args {
+        ensure_console();
     }
     #[cfg(target_os = "windows")]
     #[cfg(not(debug_assertions))]

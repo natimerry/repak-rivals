@@ -13,11 +13,10 @@ use install_mod_logic::install_mods_in_viewport;
 use repak::utils::AesKey;
 use repak::Compression::Oodle;
 use repak::{Compression, PakReader};
+use rfd::MessageButtons;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
-#[cfg(all(windows, not(debug_assertions)))]
-use std::process::Command;
 use std::str::FromStr;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicBool, AtomicI32};
@@ -29,24 +28,17 @@ use walkdir::WalkDir;
 
 #[cfg(all(windows, not(debug_assertions)))]
 fn spawn_install_terminal() {
-    match Command::new("cmd")
-        .args([
-            "/C",
-            "start",
-            "repak-rivals install",
-            "cmd",
-            "/K",
-            "echo repak-rivals install started. Close this window when finished.",
-        ])
-        .spawn()
-    {
-        Ok(_) => info!("Spawned install terminal"),
-        Err(err) => warn!(error = %err, "Failed to spawn install terminal"),
-    }
+    crate::ensure_console();
+    crate::redirect_stdio();
 }
 
 #[cfg(any(not(windows), debug_assertions))]
 fn spawn_install_terminal() {}
+
+fn install_needs_to_legacy_console(mods: &[InstallableMod]) -> bool {
+    mods.iter()
+        .any(|mods| mods.enabled && mods.iostore && mods.repak)
+}
 
 #[derive(Debug, Clone)]
 pub struct InstallableMod {
@@ -54,6 +46,7 @@ pub struct InstallableMod {
     pub mod_type: String,
     pub repak: bool,
     pub fix_mesh: bool,
+    pub kawaii_porter: bool,
     pub is_dir: bool,
     pub editing: bool,
     pub path_hash_seed: String,
@@ -78,6 +71,7 @@ impl Default for InstallableMod {
             mod_type: "".to_string(),
             repak: false,
             fix_mesh: false,
+            kawaii_porter: true,
             is_dir: false,
             editing: false,
             path_hash_seed: "".to_string(),
@@ -145,6 +139,23 @@ impl ModInstallRequest {
 }
 
 impl ModInstallRequest {
+    fn mod_needs_kawaii_mapping(mods: &InstallableMod) -> bool {
+        mods.kawaii_porter && (mods.is_dir || mods.repak)
+    }
+
+    fn missing_kawaii_mapping_error(&self) -> Option<&'static str> {
+        let needs_mapping = self
+            .mods
+            .iter()
+            .any(|mods| mods.enabled && Self::mod_needs_kawaii_mapping(mods));
+
+        if needs_mapping && self.kawaii_physics_usmap.is_none() {
+            Some("Select a mapping file before installing with KawaiiPhysics fixes enabled.")
+        } else {
+            None
+        }
+    }
+
     #[instrument(skip(self, ctx, show_callback), fields(mod_count = self.mods.len(), mod_directory = ?self.mod_directory))]
     pub fn new_mod_dialog(&mut self, ctx: &egui::Context, show_callback: &mut bool) {
         let viewport_options = egui::ViewportBuilder::default()
@@ -200,9 +211,25 @@ impl ModInstallRequest {
                                 });
 
                                 if install_mod.clicked() {
-                                    info!("Starting install worker");
-                                    spawn_install_terminal();
+                                    if let Some(message) = self.missing_kawaii_mapping_error() {
+                                        rfd::MessageDialog::new()
+                                            .set_buttons(MessageButtons::Ok)
+                                            .set_title("Missing mapping file")
+                                            .set_description(message)
+                                            .set_level(rfd::MessageLevel::Error)
+                                            .show();
+                                        return;
+                                    }
+
                                     let mut mods = self.mods.to_vec(); // clone
+                                    let needs_to_legacy_console =
+                                        install_needs_to_legacy_console(&mods);
+                                    if needs_to_legacy_console {
+                                        info!("Starting install worker with to-legacy console");
+                                        spawn_install_terminal();
+                                    } else {
+                                        info!("Starting install worker");
+                                    }
                                     self.total_mods =
                                         mods.iter()
                                             .filter(|m| m.enabled)
@@ -225,6 +252,10 @@ impl ModInstallRequest {
                                             &chunkdir,
                                             &kawaii_physics_usmap,
                                         );
+                                        #[cfg(all(windows, not(debug_assertions)))]
+                                        if needs_to_legacy_console {
+                                            crate::free_console();
+                                        }
                                     }));
                                     self.animate = true;
                                 }
@@ -366,9 +397,16 @@ impl ModInstallRequest {
                         });
                         row.col(|ui| {
                             ui.collapsing("Options", |ui| {
+                                let repack_controls_enabled = !mods.is_dir;
+                                let porter_enabled = mods.is_dir || mods.repak;
+
                                 ui.add_enabled(
-                                    !mods.is_dir,
+                                    repack_controls_enabled && !mods.is_dir,
                                     Checkbox::new(&mut mods.repak, "To repak"),
+                                );
+                                ui.add_enabled(
+                                    porter_enabled,
+                                    Checkbox::new(&mut mods.kawaii_porter, "Kawaii porter"),
                                 );
                                 ui.add_enabled(
                                     (mods.is_dir || mods.repak) && false, // new retoc should auto patch
@@ -376,46 +414,54 @@ impl ModInstallRequest {
                                 );
 
                                 ui.add_enabled(
-                                    mods.is_dir || mods.repak,
+                                    porter_enabled,
                                     Checkbox::new(&mut mods.obfuscated, "Obfuscate"),
                                 );
 
                                 let text_edit = TextEdit::singleline(&mut mods.mount_point);
-                                ui.add(text_edit.hint_text("Enter mount point..."));
+                                ui.add_enabled(
+                                    porter_enabled,
+                                    text_edit.hint_text("Enter mount point..."),
+                                );
 
                                 // Text edit for path_hash_seed with hint
                                 let text_edit = TextEdit::singleline(&mut mods.path_hash_seed);
-                                ui.add(text_edit.hint_text("Enter path hash seed..."));
+                                ui.add_enabled(
+                                    porter_enabled,
+                                    text_edit.hint_text("Enter path hash seed..."),
+                                );
 
-                                ComboBox::new("comp_level", "Compression Algorithm")
-                                    .selected_text(format!("{:?}", mods.compression))
-                                    .show_ui(ui, |ui| {
-                                        ui.selectable_value(
-                                            &mut mods.compression,
-                                            Compression::Zlib,
-                                            "Zlib",
-                                        );
-                                        ui.selectable_value(
-                                            &mut mods.compression,
-                                            Compression::Gzip,
-                                            "Gzip",
-                                        );
-                                        ui.selectable_value(
-                                            &mut mods.compression,
-                                            Compression::Oodle,
-                                            "Oodle",
-                                        );
-                                        ui.selectable_value(
-                                            &mut mods.compression,
-                                            Compression::Zstd,
-                                            "Zstd",
-                                        );
-                                        ui.selectable_value(
-                                            &mut mods.compression,
-                                            Compression::LZ4,
-                                            "LZ4",
-                                        );
-                                    });
+                                ui.add_enabled_ui(porter_enabled, |ui| {
+                                    ComboBox::new("comp_level", "Compression Algorithm")
+                                        .selected_text(format!("{:?}", mods.compression))
+                                        .show_ui(ui, |ui| {
+                                            ui.selectable_value(
+                                                &mut mods.compression,
+                                                Compression::Zlib,
+                                                "Zlib",
+                                            );
+                                            ui.selectable_value(
+                                                &mut mods.compression,
+                                                Compression::Gzip,
+                                                "Gzip",
+                                            );
+                                            ui.selectable_value(
+                                                &mut mods.compression,
+                                                Compression::Oodle,
+                                                "Oodle",
+                                            );
+                                            ui.selectable_value(
+                                                &mut mods.compression,
+                                                Compression::Zstd,
+                                                "Zstd",
+                                            );
+                                            ui.selectable_value(
+                                                &mut mods.compression,
+                                                Compression::LZ4,
+                                                "LZ4",
+                                            );
+                                        });
+                                });
                             });
                         });
                     })
@@ -473,7 +519,7 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                 let installable_mod = InstallableMod {
                     mod_name: path.file_stem().unwrap().to_str().unwrap().to_string(),
                     mod_type: modtype.to_string(),
-                    repak: true,
+                    repak: !iostore,
                     fix_mesh: false,
                     is_dir: false,
                     reader: Some(builder),
@@ -511,18 +557,41 @@ pub fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
             let mut modtype = "Unknown".to_string();
             let mut pak = None;
             let mut len = 1;
+            let mut iostore = false;
+            let mut mod_path = path.clone();
 
             if !is_dir && !is_archive {
                 debug!(?path, "Inspecting pak file");
+                let pak_path = path.with_extension("pak");
+                let utoc_path = path.with_extension("utoc");
+                let ucas_path = path.with_extension("ucas");
+                let reader_path = if extension == "utoc" || extension == "ucas" {
+                    pak_path.clone()
+                } else {
+                    path.clone()
+                };
+                mod_path = reader_path.clone();
+
                 let builder = repak::PakBuilder::new()
                     .key(AES_KEY.clone().0)
-                    .reader(&mut BufReader::new(File::open(path.clone()).unwrap()));
+                    .reader(&mut BufReader::new(File::open(reader_path).unwrap()));
                 match builder {
                     Ok(builder) => {
                         pak = Some(builder.clone());
-                        let files = builder.files();
-                        len = processable_asset_count(files.iter().map(String::as_str));
-                        modtype = get_current_pak_characteristics(files);
+                        if pak_path.exists() && utoc_path.exists() && ucas_path.exists() {
+                            let files = read_utoc(&utoc_path, &builder, &pak_path);
+                            let files = files
+                                .iter()
+                                .map(|x| x.file_path.clone())
+                                .collect::<Vec<_>>();
+                            len = processable_asset_count(files.iter().map(String::as_str));
+                            modtype = get_current_pak_characteristics(files);
+                            iostore = true;
+                        } else {
+                            let files = builder.files();
+                            len = processable_asset_count(files.iter().map(String::as_str));
+                            modtype = get_current_pak_characteristics(files);
+                        }
                     }
                     Err(e) => {
                         error!(?path, error = %e, "Error reading pak file");
@@ -568,14 +637,15 @@ pub fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
             Ok(InstallableMod {
                 mod_name: path.file_stem().unwrap().to_str().unwrap().to_string(),
                 mod_type: modtype,
-                repak: !is_dir,
+                repak: !is_dir && pak.is_some() && !iostore,
                 fix_mesh: false,
                 is_dir,
                 reader: pak,
-                mod_path: path.clone(),
+                mod_path,
                 mount_point: "../../../".to_string(),
                 path_hash_seed: "00000000".to_string(),
                 total_files: len,
+                iostore,
                 is_archived: is_archive,
                 ..Default::default()
             })

@@ -1,8 +1,6 @@
 extern crate core;
 
 use crate::file_table::FileTable;
-#[cfg(windows)]
-use crate::free_console;
 use crate::install_mod::install_mod_logic::iotoc::{to_legacy_uasset, to_legacy_uasset_fast};
 use crate::install_mod::{
     self, map_dropped_file_to_mods, map_paths_to_mods, InstallableMod, ModInstallRequest, AES_KEY,
@@ -18,6 +16,7 @@ use eframe::egui::{
     ScrollArea, Stroke, Style, TextEdit, TextStyle, Theme,
 };
 use egui_flex::{item, Flex, FlexAlign};
+use install_mod::install_mod_logic::fix_installed_iostore_kawaii_physics;
 use install_mod::install_mod_logic::pak_files::extract_pak_to_dir;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use path_clean::PathClean;
@@ -374,12 +373,7 @@ impl RepakModManager {
                         obfuscated: obfuscated.clone(),
                         is_iostore,
                     });
-                    (
-                        "Pending".to_string(),
-                        "Pending".to_string(),
-                        true,
-                        None,
-                    )
+                    ("Pending".to_string(), "Pending".to_string(), true, None)
                 }
             };
 
@@ -397,12 +391,11 @@ impl RepakModManager {
         }
 
         self.pak_files = next_entries;
-        self.current_pak_file_idx = selected_identity
-            .and_then(|identity| {
-                self.pak_files
-                    .iter()
-                    .position(|entry| normalized_mod_identity_string(&entry.path) == identity)
-            });
+        self.current_pak_file_idx = selected_identity.and_then(|identity| {
+            self.pak_files
+                .iter()
+                .position(|entry| normalized_mod_identity_string(&entry.path) == identity)
+        });
         if self.current_pak_file_idx.is_none() {
             self.table = None;
             self.selected_pak_details = None;
@@ -410,7 +403,10 @@ impl RepakModManager {
 
         self.start_metadata_worker(generation, jobs);
         self.prune_metadata_cache();
-        info!(mod_entries = self.pak_files.len(), "Loaded mod entries from fast scan");
+        info!(
+            mod_entries = self.pak_files.len(),
+            "Loaded mod entries from fast scan"
+        );
     }
 
     fn start_metadata_worker(&mut self, generation: u64, jobs: Vec<MetadataJob>) {
@@ -563,19 +559,20 @@ impl RepakModManager {
         self.current_pak_file_idx = Some(idx);
         match Self::open_pak_reader(&pak_path) {
             Ok(reader) => {
-                self.selected_pak_details = Some(SelectedPakDetailsState::Loaded(
-                    SelectedPakDetails {
+                self.selected_pak_details =
+                    Some(SelectedPakDetailsState::Loaded(SelectedPakDetails {
                         path: pak_path.clone(),
                         mount_point: reader.mount_point().to_string(),
                         path_hash_seed: format!("{:?}", reader.path_hash_seed()),
                         version: format!("{:?}", reader.version()),
-                    },
-                ));
+                    }));
                 self.table = Some(FileTable::new(&reader, &pak_path));
             }
             Err(error) => {
-                self.selected_pak_details =
-                    Some(SelectedPakDetailsState::Failed { path: pak_path, error });
+                self.selected_pak_details = Some(SelectedPakDetailsState::Failed {
+                    path: pak_path,
+                    error,
+                });
                 self.table = None;
             }
         }
@@ -1025,12 +1022,20 @@ impl RepakModManager {
                         return;
                     };
 
-                    if let Err(e) = to_legacy_uasset_fast(
+                    #[cfg(all(windows, not(debug_assertions)))]
+                    {
+                        crate::ensure_console();
+                        crate::redirect_stdio();
+                    }
+                    let result = to_legacy_uasset_fast(
                         pak_path.to_path_buf(),
                         dir,
                         self.game_path.clone(),
                         game_chunk_path,
-                    ) {
+                    );
+                    #[cfg(all(windows, not(debug_assertions)))]
+                    crate::free_console();
+                    if let Err(e) = result {
                         error!(error = %e, "Failed to fast-convert IoStore mod to legacy asset");
                     }
                 } else {
@@ -1062,7 +1067,7 @@ impl RepakModManager {
                         warn!("Cannot convert to legacy without a detected game chunk path");
                         return;
                     };
-                    #[cfg(windows)]
+                    #[cfg(all(windows, not(debug_assertions)))]
                     {
                         crate::ensure_console();
                         crate::redirect_stdio();
@@ -1076,8 +1081,68 @@ impl RepakModManager {
                     ) {
                         error!(error = %e, "Failed to convert mod to legacy asset");
                     }
-                    #[cfg(windows)]
-                    free_console();
+                    #[cfg(all(windows, not(debug_assertions)))]
+                    crate::free_console();
+                }
+            }
+
+            if ui.button("Fix KawaiiPhysics").clicked() {
+                let Some(game_chunk_path) = self.game_chunk_path.clone() else {
+                    warn!("Cannot fix KawaiiPhysics without a detected game chunk path");
+                    return;
+                };
+                let Some(kawaii_physics_usmap) = self.kawaii_physics_usmap.clone() else {
+                    rfd::MessageDialog::new()
+                        .set_buttons(MessageButtons::Ok)
+                        .set_title("Missing mapping file")
+                        .set_description("Select a KawaiiPhysics unversioned mapping file before fixing KawaiiPhysics.")
+                        .show();
+                    return;
+                };
+                let mod_name = pak_path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or("fixed_mod")
+                    .to_string();
+                let installable_mod = InstallableMod {
+                    mod_name,
+                    mod_type: "".to_string(),
+                    repak: false,
+                    fix_mesh: false,
+                    kawaii_porter: true,
+                    is_dir: false,
+                    reader: None,
+                    mod_path: pak_path.to_path_buf(),
+                    mount_point: "../../../".to_string(),
+                    path_hash_seed: "00000000".to_string(),
+                    compression: repak::Compression::Oodle,
+                    total_files: 1,
+                    iostore: true,
+                    is_archived: false,
+                    editing: false,
+                    enabled: true,
+                    obfuscated: false,
+                };
+
+                #[cfg(all(windows, not(debug_assertions)))]
+                {
+                    crate::ensure_console();
+                    crate::redirect_stdio();
+                }
+
+                let result = fix_installed_iostore_kawaii_physics(
+                    &installable_mod,
+                    &self.game_path,
+                    Arc::new(AtomicI32::new(0)),
+                    &Some(game_chunk_path),
+                    &Some(kawaii_physics_usmap),
+                );
+
+                #[cfg(all(windows, not(debug_assertions)))]
+                crate::free_console();
+
+                if let Err(e) = result {
+                    error!(error = %e, "Failed to fix installed IoStore KawaiiPhysics");
                 }
             }
         }
@@ -1267,7 +1332,10 @@ impl RepakModManager {
                             "Failed to create detected mods directory"
                         );
                     } else {
-                        info!(detected_mods_path_exists = mods_path.exists(), "Using detected Steam mods path");
+                        info!(
+                            detected_mods_path_exists = mods_path.exists(),
+                            "Using detected Steam mods path"
+                        );
                     }
                     config.game_path = mods_path;
                     persist_config = true;
@@ -1489,7 +1557,10 @@ impl RepakModManager {
                     }
                 }
                 if let Some(path) = &self.kawaii_physics_usmap {
-                    ui.label(format!("Mapping: {}", path.display()));
+                    ui.label(format!(
+                        "{}",
+                        path.file_stem().unwrap_or_default().display()
+                    ));
                     if ui.button("Clear Mapping file").clicked() {
                         self.kawaii_physics_usmap = None;
                         if let Err(e) = self.save_state() {
@@ -1557,7 +1628,10 @@ impl RepakModManager {
                 flex_ui.add_ui(item(), |ui| {
                     let x = ui.add_enabled(self.game_path.exists(), Button::new("Open mod folder"));
                     if x.clicked() {
-                        info!(mod_folder_exists = self.game_path.exists(), "Opening mod folder");
+                        info!(
+                            mod_folder_exists = self.game_path.exists(),
+                            "Opening mod folder"
+                        );
                         #[cfg(target_os = "windows")]
                         {
                             if let Err(e) = crate::launch_game::shell_open_path(&self.game_path) {
@@ -1574,7 +1648,10 @@ impl RepakModManager {
 
                         #[cfg(target_os = "linux")]
                         {
-                            debug!(mod_folder_exists = self.game_path.exists(), "Opening mod folder");
+                            debug!(
+                                mod_folder_exists = self.game_path.exists(),
+                                "Opening mod folder"
+                            );
                             let _ = std::process::Command::new("xdg-open")
                                 .arg(self.game_path.to_string_lossy().to_string())
                                 .spawn();
@@ -1588,7 +1665,10 @@ impl RepakModManager {
                     let (launch_enabled, hover_text) = match &launch_check {
                         Ok(paths) => (
                             true,
-                            format!("Launch Marvel Rivals via Steam ({})", paths.paks_path.display()),
+                            format!(
+                                "Launch Marvel Rivals via Steam ({})",
+                                paths.paks_path.display()
+                            ),
                         ),
                         Err(e) => (false, e.clone()),
                     };
@@ -1845,7 +1925,9 @@ fn mod_file_signature(path: &Path) -> Option<ModFileSignature> {
 }
 
 fn system_time_to_secs(time: SystemTime) -> Option<u64> {
-    time.duration_since(UNIX_EPOCH).ok().map(|duration| duration.as_secs())
+    time.duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_secs())
 }
 
 fn has_mod_suffix(name: &str) -> bool {

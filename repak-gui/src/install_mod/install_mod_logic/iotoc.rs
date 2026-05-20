@@ -131,13 +131,21 @@ fn hardlink_iostore_container(src_utoc: &Path, dst_dir: &Path) -> Result<(), rep
             continue;
         }
         let dst = dst_dir.join(format!("{stem}.{ext}"));
-        std::fs::hard_link(&src, &dst).map_err(|e| {
-            repak::Error::Io(std::io::Error::other(format!(
-                "Failed to hardlink {} to {}: {e}",
-                src.display(),
-                dst.display()
-            )))
-        })?;
+        if let Err(link_error) = std::fs::hard_link(&src, &dst) {
+            debug!(
+                src = %src.display(),
+                dst = %dst.display(),
+                error = %link_error,
+                "Falling back to copying IoStore container"
+            );
+            std::fs::copy(&src, &dst).map_err(|copy_error| {
+                repak::Error::Io(std::io::Error::other(format!(
+                    "Failed to hardlink or copy {} to {}: hardlink: {link_error}; copy: {copy_error}",
+                    src.display(),
+                    dst.display()
+                )))
+            })?;
+        }
     }
 
     Ok(())
@@ -149,7 +157,7 @@ fn should_open_fast_game_container(path: &Path) -> bool {
     };
     let stem_lower = stem.to_ascii_lowercase();
     stem_lower == "global"
-        // || (stem_lower.starts_with("pakchunk") && stem_lower.contains("character"))
+        || (stem_lower.starts_with("pakchunk") && stem_lower.contains("character"))
 }
 
 fn prepare_fast_to_legacy_input(
@@ -160,12 +168,7 @@ fn prepare_fast_to_legacy_input(
     let temp_dir = tempfile::tempdir_in(game_paks_dir).map_err(repak::Error::Io)?;
     let temp_path = temp_dir.path();
 
-    if !selected_utoc.starts_with(mods_dir) {
-        return Err(repak::Error::Io(std::io::Error::other(format!(
-            "Selected IoStore container is outside mods directory: {}",
-            selected_utoc.display()
-        ))));
-    }
+    debug!(mods_dir = %mods_dir.display(), selected_utoc = %selected_utoc.display(), "Preparing fast to-legacy input");
     hardlink_iostore_container(selected_utoc, temp_path)?;
 
     for entry in std::fs::read_dir(game_paks_dir).map_err(repak::Error::Io)? {
@@ -180,12 +183,39 @@ fn prepare_fast_to_legacy_input(
     Ok(temp_dir)
 }
 
+fn collect_fast_to_legacy_inputs(
+    mod_utocs: impl IntoIterator<Item = PathBuf>,
+    game_paks_dir: &Path,
+) -> Result<Vec<PathBuf>, repak::Error> {
+    let mut inputs = Vec::new();
+    let mut seen = HashSet::new();
+
+    for path in mod_utocs {
+        if seen.insert(path.clone()) {
+            inputs.push(path);
+        }
+    }
+
+    for entry in std::fs::read_dir(game_paks_dir).map_err(repak::Error::Io)? {
+        let path = entry.map_err(repak::Error::Io)?.path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("utoc")
+            && should_open_fast_game_container(&path)
+            && seen.insert(path.clone())
+        {
+            inputs.push(path);
+        }
+    }
+
+    Ok(inputs)
+}
+
 pub fn convert_directory_to_iostore(
     pak: &InstallableMod,
     mod_dir: PathBuf,
     to_pak_dir: PathBuf,
     packed_files_count: Arc<AtomicI32>,
     kawaii_physics_usmap: Option<PathBuf>,
+    kawaii_porter: bool,
 ) -> Result<(), repak::Error> {
     let mod_type = pak.mod_type.clone();
     if mod_type == "Audio" || mod_type == "Movies" {
@@ -209,7 +239,7 @@ pub fn convert_directory_to_iostore(
         patch_meshes::mesh_patch(&mut paths, &to_pak_dir.to_path_buf())?;
     }
 
-    let action = ActionToZen::new(
+    let mut action = ActionToZen::new(
         to_pak_dir.clone(),
         mod_dir.join(utoc_name),
         EngineVersion::UE5_3,
@@ -217,9 +247,22 @@ pub fn convert_directory_to_iostore(
     )
     .with_obfuscation(pak.obfuscated);
 
+    if kawaii_porter {
+        let usmap = kawaii_physics_usmap.clone().ok_or_else(|| {
+            repak::Error::Io(std::io::Error::other(
+                "KawaiiPhysics porting is enabled, but no USMAP file was provided",
+            ))
+        })?;
+        debug!(
+            usmap = %usmap.display(),
+            "Passing USMAP to KawaiiPhysics porter"
+        );
+        action = action.with_kawaii_physics_port(usmap);
+    }
+
     let mut config = Config {
         container_header_version_override: None,
-        port_kawaii_physics: true,
+        port_kawaii_physics: kawaii_porter,
         kawaii_physics_usmap: kawaii_physics_usmap,
         kawaii_physics_force_rebuild: true,
         ..Default::default()
@@ -452,7 +495,10 @@ pub fn to_legacy_uasset_fast(
 
     let config = to_legacy_config()?;
     let filter = build_to_legacy_filter(pak.with_extension("utoc"), config.clone());
-    info!(package_count = filter.len(), "Prepared fast to-legacy filter");
+    info!(
+        package_count = filter.len(),
+        "Prepared fast to-legacy filter"
+    );
 
     let input_dir =
         prepare_fast_to_legacy_input(&pak.with_extension("utoc"), &mods_dir, &game_paks_dir)?;
@@ -492,4 +538,70 @@ pub fn to_legacy_uasset_fast(
 
     info!("fast to-legacy conversion complete");
     Ok(())
+}
+
+#[instrument(skip_all, fields(mod_count = paks.len(), output_dir = %output_dir.display(), game_paks_dir = %game_paks_dir.display()))]
+pub fn to_legacy_uasset_fast_batch(
+    paks: &[PathBuf],
+    output_dir: PathBuf,
+    game_paks_dir: PathBuf,
+) -> Result<Vec<PathBuf>, repak::Error> {
+    let config = to_legacy_config()?;
+    let mut items = Vec::new();
+    let mut extracted_dirs = Vec::new();
+
+    for pak in paks {
+        let mod_stem = pak
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .ok_or_else(|| {
+                repak::Error::Io(std::io::Error::other(format!(
+                    "Invalid mod filename for batch to-legacy conversion: {}",
+                    pak.display()
+                )))
+            })?
+            .to_string();
+        let output = output_dir.join(&mod_stem);
+        std::fs::create_dir_all(&output).map_err(repak::Error::Io)?;
+        let filter = build_to_legacy_filter(pak.with_extension("utoc"), config.clone());
+        info!(
+            mod_name = %mod_stem,
+            package_count = filter.len(),
+            "Prepared batch to-legacy filter"
+        );
+        items.push(retoc::ActionToLegacyBatchItem {
+            output: output.clone(),
+            filter,
+        });
+        extracted_dirs.push(output);
+    }
+
+    let inputs = collect_fast_to_legacy_inputs(
+        paks.iter().map(|pak| pak.with_extension("utoc")),
+        &game_paks_dir,
+    )?;
+    info!(
+        container_count = inputs.len(),
+        item_count = items.len(),
+        "Starting retoc batch to-legacy"
+    );
+
+    retoc::action_to_legacy_batch(
+        retoc::ActionToLegacyBatch {
+            inputs,
+            items,
+            no_assets: false,
+            no_shaders: false,
+            no_compres_shaders: true,
+            dry_run: false,
+            version: None,
+            verbose: true,
+            debug: false,
+            no_parallel: false,
+        },
+        config,
+    )
+    .map_err(|e| repak::Error::Io(std::io::Error::other(e.to_string())))?;
+
+    Ok(extracted_dirs)
 }

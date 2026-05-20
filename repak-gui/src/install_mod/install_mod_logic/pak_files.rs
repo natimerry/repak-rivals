@@ -92,6 +92,7 @@ pub fn create_repak_from_pak(
     mod_dir: PathBuf,
     packed_files_count: Arc<AtomicI32>,
     kawaii_physics_usmap: &Option<PathBuf>,
+    kawaii_porter: bool,
 ) -> Result<(), repak::Error> {
     // extract the pak first into a temporary dir
     let temp_dir = tempdir().map_err(repak::Error::Io)?;
@@ -104,6 +105,7 @@ pub fn create_repak_from_pak(
         temp_path.to_path_buf(),
         packed_files_count,
         kawaii_physics_usmap.clone(),
+        kawaii_porter,
     )?;
     // repak_dir(pak, PathBuf::from(temp_path), mod_dir,packed_files_count)?;
     Ok(())
