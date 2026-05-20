@@ -127,6 +127,13 @@ jobs:
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           fi
+      - name: "Setup .NET SDK"
+        uses: "actions/setup-dotnet@v5"
+        with:
+          "dotnet-version": "8.0.x"
+      - name: "Verify .NET"
+        run: "dotnet --info"
+        shell: "bash"
       - uses: swatinem/rust-cache@v2
         with:
           key: ${{ join(matrix.targets, '-') }}

@@ -19,4 +19,4 @@ install-path = "CARGO_HOME"
 install-updater = true
 # Whether to install an updater program
 
-github-build-setup = ".github/dist-build-setup.yml"
+github-build-setup = "dist-build-setup.yml"
