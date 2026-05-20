@@ -34,7 +34,7 @@ rayon = "1.10.0"
 sha2 = "0.10.8"
 strum = { workspace = true }
 itertools = "0.14.0"
-glob = "0.3.2"
+glob = "0.3.3"
 byteorder = "1.5.0"
 colored = "3.0.0"
 uasset-mesh-patch-rivals = { path = "../uasset-mesh-patch-rivals" }
