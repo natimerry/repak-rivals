@@ -20,10 +20,9 @@ pub fn read_utoc(
         ..Default::default()
     };
 
-    let aes_toc = retoc::AesKey::from_str(
-        "0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74",
-    )
-    .expect("Failed to parse AES key");
+    let aes_toc =
+        retoc::AesKey::from_str("0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74")
+            .expect("Failed to parse AES key");
 
     config.aes_keys.insert(FGuid::default(), aes_toc.clone());
     let config = Arc::new(config);
@@ -56,16 +55,15 @@ pub fn read_utoc_package_names(utoc_path: &Path) -> Result<Vec<String>, String> 
         ..Default::default()
     };
 
-    let aes_toc = retoc::AesKey::from_str(
-        "0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74",
-    )
-    .map_err(|e| format!("Failed to parse AES key: {e}"))?;
+    let aes_toc =
+        retoc::AesKey::from_str("0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74")
+            .map_err(|e| format!("Failed to parse AES key: {e}"))?;
 
     config.aes_keys.insert(FGuid::default(), aes_toc.clone());
     let config = Arc::new(config);
 
-    let ops =
-        action_manifest(action_mn, config).map_err(|e| format!("Failed to read utoc manifest: {e}"))?;
+    let ops = action_manifest(action_mn, config)
+        .map_err(|e| format!("Failed to read utoc manifest: {e}"))?;
     Ok(ops
         .oplog
         .entries

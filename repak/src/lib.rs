@@ -112,7 +112,9 @@ impl Version {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, strum::Display, strum::EnumString, strum::VariantNames)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, Debug, strum::Display, strum::EnumString, strum::VariantNames,
+)]
 pub enum Compression {
     Zlib,
     Gzip,

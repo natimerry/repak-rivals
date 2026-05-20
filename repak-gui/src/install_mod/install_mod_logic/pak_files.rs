@@ -175,8 +175,8 @@ pub fn repak_dir(
     pak_writer.write_index()?;
 
     log::info!("Wrote pak file successfully");
-    let minimum_progress = base_progress
-        .saturating_add(pak.total_files.max(1).min(i32::MAX as usize) as i32);
+    let minimum_progress =
+        base_progress.saturating_add(pak.total_files.max(1).min(i32::MAX as usize) as i32);
     installed_mods_ptr.fetch_max(minimum_progress, Ordering::SeqCst);
     Ok::<(), repak::Error>(())
 }

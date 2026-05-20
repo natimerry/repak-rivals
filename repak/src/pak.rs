@@ -339,10 +339,7 @@ fn root_path(mount_point: &str, path: &str) -> String {
             keep
         })
         .collect::<String>();
-    path
-        .strip_prefix("../../../")
-        .unwrap_or(&path)
-        .to_string()
+    path.strip_prefix("../../../").unwrap_or(&path).to_string()
 }
 
 struct Data<'d>(Box<dyn AsRef<[u8]> + Send + Sync + 'd>);
@@ -401,7 +398,6 @@ impl Pak {
             #[cfg(feature = "encryption")]
             crate::data::decrypt(key, &mut index)?;
         }
-
 
         let mut index = io::Cursor::new(index);
         let mount_point = index.read_string()?;

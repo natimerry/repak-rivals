@@ -203,12 +203,12 @@ impl ModInstallRequest {
                                     info!("Starting install worker");
                                     spawn_install_terminal();
                                     let mut mods = self.mods.to_vec(); // clone
-                                    self.total_mods = mods
-                                        .iter()
-                                        .filter(|m| m.enabled)
-                                        .map(|m| m.total_files)
-                                        .sum::<usize>()
-                                        .max(1) as f32;
+                                    self.total_mods =
+                                        mods.iter()
+                                            .filter(|m| m.enabled)
+                                            .map(|m| m.total_files)
+                                            .sum::<usize>()
+                                            .max(1) as f32;
                                     self.installed_mods_cbk.store(0, SeqCst);
 
                                     let dir = self.mod_directory.clone();

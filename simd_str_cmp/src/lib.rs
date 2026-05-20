@@ -182,7 +182,6 @@ pub unsafe fn compare_bytes_simd_avx2_128(a: &[u8], b: &[u8]) -> bool {
     true
 }
 
-
 fn compare_bytes_simd_dynamic(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
@@ -295,9 +294,10 @@ mod tests {
         // "hello" vs "hello" should be flagged as a conflict.
         assert_eq!(conflicts, vec![(0, 0)]);
 
-
-        assert_eq!(compare_string_vectors(&haystack1, &haystack2),
-                   compare_string_vectors_simd(&haystack1,&haystack2));
+        assert_eq!(
+            compare_string_vectors(&haystack1, &haystack2),
+            compare_string_vectors_simd(&haystack1, &haystack2)
+        );
     }
 
     // Test: one string being a prefix of the other is considered a conflict.
@@ -308,9 +308,10 @@ mod tests {
         let conflicts = compare_string_vectors_simd(&haystack1, &haystack2);
         assert!(conflicts.is_empty());
 
-
-        assert_eq!(compare_string_vectors(&haystack1, &haystack2),
-                   compare_string_vectors_simd(&haystack1,&haystack2));
+        assert_eq!(
+            compare_string_vectors(&haystack1, &haystack2),
+            compare_string_vectors_simd(&haystack1, &haystack2)
+        );
     }
 
     // Test: strings that do not match should not produce any conflict.
@@ -321,9 +322,10 @@ mod tests {
         let conflicts = compare_string_vectors_simd(&haystack1, &haystack2);
         assert!(conflicts.is_empty());
 
-
-        assert_eq!(compare_string_vectors(&haystack1, &haystack2),
-                   compare_string_vectors_simd(&haystack1,&haystack2));
+        assert_eq!(
+            compare_string_vectors(&haystack1, &haystack2),
+            compare_string_vectors_simd(&haystack1, &haystack2)
+        );
     }
 
     // Test: how empty strings are handled.
@@ -338,9 +340,10 @@ mod tests {
         assert_eq!(conflicts.len(), 1);
         assert!(conflicts.contains(&(0, 1)));
 
-
-        assert_eq!(compare_string_vectors(&haystack1, &haystack2),
-                   compare_string_vectors_simd(&haystack1,&haystack2));
+        assert_eq!(
+            compare_string_vectors(&haystack1, &haystack2),
+            compare_string_vectors_simd(&haystack1, &haystack2)
+        );
     }
 
     // Test: multiple strings with some conflicts.
@@ -366,14 +369,16 @@ mod tests {
         let mut expected = vec![(0, 0), (1, 1), (2, 2)];
         expected.sort();
 
-
-        assert_eq!(compare_string_vectors(&haystack1, &haystack2),
-                   compare_string_vectors_simd(&haystack1,&haystack2));
+        assert_eq!(
+            compare_string_vectors(&haystack1, &haystack2),
+            compare_string_vectors_simd(&haystack1, &haystack2)
+        );
         assert_eq!(conflicts_sorted, expected);
 
-
-        assert_eq!(compare_string_vectors(&haystack1, &haystack2),
-                   compare_string_vectors_simd(&haystack1,&haystack2));
+        assert_eq!(
+            compare_string_vectors(&haystack1, &haystack2),
+            compare_string_vectors_simd(&haystack1, &haystack2)
+        );
     }
 
     #[test]
@@ -396,9 +401,10 @@ mod tests {
             "Expected no conflict because the strings differ after the common prefix"
         );
 
-
-        assert_eq!(compare_string_vectors(&haystack1, &haystack2),
-                   compare_string_vectors_simd(&haystack1,&haystack2));
+        assert_eq!(
+            compare_string_vectors(&haystack1, &haystack2),
+            compare_string_vectors_simd(&haystack1, &haystack2)
+        );
     }
 }
 
