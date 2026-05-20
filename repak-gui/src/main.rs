@@ -9,7 +9,10 @@ mod utils;
 pub mod ios_widget;
 mod utoc_utils;
 mod welcome;
-use crate::install_mod::install_mod_logic::iotoc::convert_directory_to_iostore;
+use crate::install_mod::install_mod_logic::install_mods_in_viewport;
+use crate::install_mod::install_mod_logic::iotoc::{
+    convert_directory_to_iostore, to_legacy_uasset_fast_batch,
+};
 use crate::install_mod::map_to_mods_internal;
 use crate::main_ui::RepakModManager;
 use crate::utils::SkinEntry;
@@ -25,7 +28,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::exit;
 use std::str::FromStr;
-use std::sync::atomic::AtomicI32;
+use std::sync::atomic::{AtomicBool, AtomicI32};
 use std::sync::Arc;
 use std::thread;
 use tracing::{debug, info, instrument};
@@ -49,7 +52,15 @@ const ICON: LazyCell<Arc<IconData>> = LazyCell::new(|| {
 
 #[cfg(target_os = "windows")]
 fn free_console() -> bool {
-    unsafe { FreeConsole() == 0 }
+    #[cfg(not(debug_assertions))]
+    {
+        if !CONSOLE_ALLOCATED_BY_US.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            return false;
+        }
+        CONSOLE_READY.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    unsafe { FreeConsole() != 0 }
 }
 
 #[cfg(windows)]
@@ -60,6 +71,7 @@ pub mod win_console {
         pub fn AttachConsole(dwProcessId: u32) -> i32;
         pub fn SetStdHandle(nStdHandle: u32, hHandle: *mut core::ffi::c_void) -> i32;
         pub fn GetStdHandle(nStdHandle: u32) -> *mut core::ffi::c_void;
+        pub fn GetConsoleWindow() -> *mut core::ffi::c_void;
         pub fn CreateFileA(
             lpFileName: *const u8,
             dwDesiredAccess: u32,
@@ -83,14 +95,43 @@ pub mod win_console {
     pub const OPEN_EXISTING: u32 = 3;
 }
 
+#[cfg(all(windows, not(debug_assertions)))]
+static CONSOLE_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(all(windows, not(debug_assertions)))]
+static CONSOLE_ALLOCATED_BY_US: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 #[cfg(windows)]
 pub fn ensure_console() {
     use win_console::*;
+    #[cfg(not(debug_assertions))]
+    if CONSOLE_READY.load(std::sync::atomic::Ordering::SeqCst) {
+        redirect_stdio();
+        return;
+    }
+
     unsafe {
-        // Try attaching first
-        if AttachConsole(ATTACH_PARENT_PROCESS) == 0 {
-            // If that fails, allocate new console
-            AllocConsole();
+        if !GetConsoleWindow().is_null() {
+            #[cfg(not(debug_assertions))]
+            CONSOLE_READY.store(true, std::sync::atomic::Ordering::SeqCst);
+            redirect_stdio();
+            return;
+        }
+
+        if AttachConsole(ATTACH_PARENT_PROCESS) != 0 {
+            #[cfg(not(debug_assertions))]
+            CONSOLE_READY.store(true, std::sync::atomic::Ordering::SeqCst);
+            redirect_stdio();
+            return;
+        }
+
+        if AllocConsole() != 0 {
+            #[cfg(not(debug_assertions))]
+            {
+                CONSOLE_READY.store(true, std::sync::atomic::Ordering::SeqCst);
+                CONSOLE_ALLOCATED_BY_US.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            redirect_stdio();
         }
     }
 }
@@ -351,7 +392,125 @@ pub fn check_repak_rivals_version(current_version: &str) {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct CliState {
+    game_path: PathBuf,
+    game_chunk_path: Option<PathBuf>,
+    kawaii_physics_usmap: Option<PathBuf>,
+}
+
+fn cli_config_paths() -> [PathBuf; 2] {
+    let dir = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("repak_manager");
+    [dir.join("repak_mod_manager.json"), dir.join("state.json")]
+}
+
+fn installed_iostore_paks(mods_dir: &std::path::Path) -> std::io::Result<Vec<PathBuf>> {
+    let mut paks = Vec::new();
+    for entry in fs::read_dir(mods_dir)? {
+        let path = entry?.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("utoc") {
+            continue;
+        }
+        let pak = path.with_extension("pak");
+        let ucas = path.with_extension("ucas");
+        if pak.exists() && ucas.exists() {
+            paks.push(pak);
+        }
+    }
+    paks.sort();
+    Ok(paks)
+}
+
+fn run_fix_kawaii_physics_cli() -> Result<(), String> {
+    let config_path = cli_config_paths()
+        .into_iter()
+        .find(|path| path.exists())
+        .ok_or_else(|| "Could not find saved repak-rivals state".to_string())?;
+    let state = fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read {}: {e}", config_path.display()))?;
+    let state: CliState = serde_json::from_str(&state)
+        .map_err(|e| format!("Failed to parse {}: {e}", config_path.display()))?;
+
+    let mods_dir = state.game_path;
+    let game_paks_dir = state
+        .game_chunk_path
+        .ok_or_else(|| "No game Paks directory found in saved state".to_string())?;
+    let kawaii_physics_usmap = state
+        .kawaii_physics_usmap
+        .ok_or_else(|| "No KawaiiPhysics USMAP file found in saved state".to_string())?;
+
+    let paks = installed_iostore_paks(&mods_dir)
+        .map_err(|e| format!("Failed to scan {}: {e}", mods_dir.display()))?;
+    if paks.is_empty() {
+        return Err(format!(
+            "No installed IoStore mods found in {}",
+            mods_dir.display()
+        ));
+    }
+
+    println!("Found {} installed IoStore mods", paks.len());
+    let extracted_temp =
+        tempfile::tempdir().map_err(|e| format!("Failed to create temp directory: {e}"))?;
+    let extracted_dirs =
+        to_legacy_uasset_fast_batch(&paks, extracted_temp.path().to_path_buf(), game_paks_dir)
+            .map_err(|e| format!("Batch to-legacy extraction failed: {e}"))?;
+
+    let fixed_mods_dir = PathBuf::from("./fixed-mods");
+    fs::create_dir_all(&fixed_mods_dir)
+        .map_err(|e| format!("Failed to create {}: {e}", fixed_mods_dir.display()))?;
+
+    for extracted_dir in extracted_dirs {
+        let mod_name = extracted_dir
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                format!(
+                    "Invalid extracted mod directory: {}",
+                    extracted_dir.display()
+                )
+            })?
+            .to_string();
+        let mod_output_dir = fixed_mods_dir.join(&mod_name);
+        fs::create_dir_all(&mod_output_dir).map_err(|e| {
+            format!(
+                "Failed to create fixed mod directory {}: {e}",
+                mod_output_dir.display()
+            )
+        })?;
+
+        let mut mods = map_to_mods_internal(&[extracted_dir]);
+        for installable_mod in &mut mods {
+            installable_mod.enabled = true;
+            installable_mod.is_dir = true;
+            installable_mod.iostore = false;
+            installable_mod.repak = false;
+            installable_mod.kawaii_porter = true;
+        }
+
+        install_mods_in_viewport(
+            &mut mods,
+            &mod_output_dir,
+            Arc::new(AtomicI32::new(0)),
+            &AtomicBool::new(false),
+            &None,
+            &Some(kawaii_physics_usmap.clone()),
+        );
+    }
+
+    println!("Wrote fixed mods to {}", fixed_mods_dir.display());
+    Ok(())
+}
+
 fn main() {
+    let args = args().collect::<Vec<String>>();
+    #[cfg(not(debug_assertions))]
+    let fix_kawaii_physics_cli = args
+        .get(1)
+        .map(|arg| arg == "--fix-kawaii-physics")
+        .unwrap_or(false);
+
     #[cfg(target_os = "windows")]
     if !is_console() {
         free_console();
@@ -362,15 +521,24 @@ fn main() {
         custom_panic(info.into());
     }));
     #[cfg(not(debug_assertions))]
-    check_repak_rivals_version(env!("CARGO_PKG_VERSION"));
+    if !fix_kawaii_physics_cli {
+        check_repak_rivals_version(env!("CARGO_PKG_VERSION"));
+    }
 
     /*
         Custom baked CLI utility for tobi, if the program detects a specific argument passed to it, it does not spaw GUI
     */
 
-    let args = args().collect::<Vec<String>>();
     let path_reset = args.iter().any(|arg| arg == "--path-reset");
     if args.len() > 1 {
+        if args[1] == "--fix-kawaii-physics" {
+            if let Err(e) = run_fix_kawaii_physics_cli() {
+                eprintln!("{e}");
+                exit(1);
+            }
+            exit(0);
+        }
+
         if args[1] == "--extract" {
             for _file in &args[2..] {
                 // create a new directory for unpacking
@@ -513,6 +681,7 @@ fn main() {
                     paths[i].clone(),
                     count,
                     None,
+                    false,
                 )
                 .expect("Failed to convert directory");
             }
