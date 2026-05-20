@@ -20,16 +20,16 @@ pub fn read_utoc(
         ..Default::default()
     };
 
-    let aes_toc =
-        retoc::AesKey::from_str("0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74")
-            .unwrap();
+    let aes_toc = retoc::AesKey::from_str(
+        "0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74",
+    )
+    .expect("Failed to parse AES key");
 
     config.aes_keys.insert(FGuid::default(), aes_toc.clone());
     let config = Arc::new(config);
 
     let ops = action_manifest(action_mn, config).expect("Failed to read utoc");
-    let ret = ops
-        .oplog
+    ops.oplog
         .entries
         .iter()
         .map(|entry| {
@@ -46,9 +46,32 @@ pub fn read_utoc(
                 package_data: Some(entry.packagedata.len()),
             }
         })
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>()
+}
 
-    ret
+pub fn read_utoc_package_names(utoc_path: &Path) -> Result<Vec<String>, String> {
+    let action_mn = ActionManifest::new(PathBuf::from(utoc_path));
+    let mut config = Config {
+        container_header_version_override: None,
+        ..Default::default()
+    };
+
+    let aes_toc = retoc::AesKey::from_str(
+        "0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74",
+    )
+    .map_err(|e| format!("Failed to parse AES key: {e}"))?;
+
+    config.aes_keys.insert(FGuid::default(), aes_toc.clone());
+    let config = Arc::new(config);
+
+    let ops =
+        action_manifest(action_mn, config).map_err(|e| format!("Failed to read utoc manifest: {e}"))?;
+    Ok(ops
+        .oplog
+        .entries
+        .iter()
+        .map(|entry| entry.packagestoreentry.packagename.clone())
+        .collect())
 }
 
 pub fn is_iostore_obfuscated(utoc_path: &Path) -> Result<bool, String> {

@@ -10,7 +10,7 @@ use crate::install_mod::{
 use crate::ios_widget;
 use crate::utils::find_marvel_rivals;
 use crate::utils::get_current_pak_characteristics;
-use crate::utoc_utils::{is_iostore_obfuscated, read_utoc};
+use crate::utoc_utils::{is_iostore_obfuscated, read_utoc_package_names};
 use crate::welcome::ShowWelcome;
 
 use eframe::egui::{
@@ -25,13 +25,16 @@ use repak::PakReader;
 use retoc::ActionUnpack;
 use rfd::{FileDialog, MessageButtons};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::atomic::AtomicI32;
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, instrument, trace, warn};
 use walkdir::WalkDir;
 
@@ -50,6 +53,8 @@ pub struct RepakModManager {
     #[serde(skip)]
     table: Option<FileTable>,
     #[serde(skip)]
+    selected_pak_details: Option<SelectedPakDetailsState>,
+    #[serde(skip)]
     file_drop_viewport_open: bool,
     #[serde(skip)]
     install_mod_dialog: Option<ModInstallRequest>,
@@ -59,6 +64,16 @@ pub struct RepakModManager {
     watcher_tx: Option<Sender<Event>>,
     #[serde(skip)]
     watcher: Option<RecommendedWatcher>,
+    #[serde(skip)]
+    metadata_receiver: Option<Receiver<MetadataMessage>>,
+    #[serde(skip)]
+    metadata_cancel: Option<Arc<AtomicBool>>,
+    #[serde(skip)]
+    metadata_generation: u64,
+    #[serde(skip)]
+    pending_refresh_at: Option<Instant>,
+    #[serde(skip)]
+    metadata_cache_dirty: bool,
 
     #[serde(skip)]
     welcome_screen: Option<ShowWelcome>,
@@ -76,12 +91,16 @@ pub struct RepakModManager {
     version: Option<String>,
 
     game_chunk_path: Option<PathBuf>,
+    #[serde(default)]
+    kawaii_physics_usmap: Option<PathBuf>,
     #[serde(skip)]
     launch_game_paths: Option<Result<crate::launch_game::GameLaunchPaths, String>>,
     #[serde(default)]
     tag_catalog: Vec<String>,
     #[serde(default)]
     mod_tags: Vec<ModTagAssignment>,
+    #[serde(default)]
+    mod_metadata_cache: Vec<ModMetadataCacheEntry>,
 
     #[serde(default)]
     show_load_order_suffix: bool,
@@ -102,12 +121,67 @@ struct ModTagAssignment {
 
 #[derive(Clone)]
 struct ModEntry {
-    reader: PakReader,
     path: PathBuf,
     enabled: bool,
+    is_iostore: bool,
+    signature: ModFileSignature,
     category: String,
     characteristic: String,
     obfuscated: String,
+    metadata_pending: bool,
+    file_count: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct ModFileSignature {
+    size: u64,
+    modified_secs: u64,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct ModMetadataCacheEntry {
+    identity: String,
+    signature: ModFileSignature,
+    category: String,
+    characteristic: String,
+    obfuscated: String,
+    file_count: Option<usize>,
+}
+
+struct MetadataJob {
+    generation: u64,
+    path: PathBuf,
+    identity: String,
+    signature: ModFileSignature,
+    obfuscated: String,
+    is_iostore: bool,
+}
+
+struct MetadataResult {
+    generation: u64,
+    identity: String,
+    signature: ModFileSignature,
+    category: String,
+    characteristic: String,
+    obfuscated: String,
+    file_count: Option<usize>,
+}
+
+enum MetadataMessage {
+    Entry(MetadataResult),
+    Done(u64),
+}
+
+struct SelectedPakDetails {
+    path: PathBuf,
+    mount_point: String,
+    path_hash_seed: String,
+    version: String,
+}
+
+enum SelectedPakDetailsState {
+    Loaded(SelectedPakDetails),
+    Failed { path: PathBuf, error: String },
 }
 fn use_dark_red_accent(style: &mut Style) {
     style.visuals.hyperlink_color = Color32::from_hex("#f71034").expect("Invalid color");
@@ -224,97 +298,292 @@ impl RepakModManager {
         }
     }
 
-    #[instrument(skip(self), fields(game_path = ?self.game_path))]
     fn collect_pak_files(&mut self) {
-        debug!("Refreshing mods");
-        if self.game_path.exists() {
-            let mut vecs = vec![];
+        info!("Refreshing mods with fast scan");
+        if !self.game_path.exists() {
+            self.pak_files.clear();
+            self.current_pak_file_idx = None;
+            self.table = None;
+            self.selected_pak_details = None;
+            return;
+        }
 
-            for entry in WalkDir::new(&self.game_path)
-                .into_iter()
-                .filter_map(Result::ok)
-                .filter(|e| e.file_type().is_file())
-            {
-                let path = entry.path();
-                if path.is_dir() {
-                    continue;
-                }
-                let mut disabled = false;
+        self.metadata_generation = self.metadata_generation.wrapping_add(1);
+        let generation = self.metadata_generation;
+        let selected_identity = self
+            .current_pak_file_idx
+            .and_then(|idx| self.pak_files.get(idx))
+            .map(|entry| normalized_mod_identity_string(&entry.path));
+        let cache_by_identity = self
+            .mod_metadata_cache
+            .iter()
+            .map(|entry| (entry.identity.clone(), entry.clone()))
+            .collect::<HashMap<_, _>>();
+        let mut next_entries = Vec::new();
+        let mut jobs = Vec::new();
 
-                if path.extension().unwrap_or_default() != "pak" {
-                    // left in old file extension for compatibility reason
-                    if path.extension().unwrap_or_default() == "pak_disabled"
-                        || path.extension().unwrap_or_default() == "bak_repak"
-                    {
-                        disabled = true;
-                    } else {
-                        continue;
-                    }
-                }
-
-                let mut builder = repak::PakBuilder::new();
-                builder = builder.key(AES_KEY.clone().0);
-                let pak = builder.reader(&mut BufReader::new(File::open(path).unwrap()));
-
-                if let Err(_e) = pak {
-                    warn!(?path, "Skipping unreadable pak file");
-                    continue;
-                }
-                let pak = pak.unwrap();
-                let file_list = Self::files_for_category(&pak, path);
-                let mut utoc_path = path.to_path_buf();
-                utoc_path.set_extension("utoc");
-                let obfuscated = if utoc_path.exists() {
-                    match is_iostore_obfuscated(&utoc_path) {
-                        Ok(value) => value.to_string(),
-                        Err(e) => {
-                            warn!(path = %utoc_path.display(), error = %e, "Failed to read IoStore obfuscation flag");
-                            "Unknown".to_string()
-                        }
-                    }
-                } else {
-                    "false".to_string()
-                };
-                let entry = ModEntry {
-                    reader: pak,
-                    path: path.to_path_buf(),
-                    enabled: !disabled,
-                    category: detect_mod_category(&file_list),
-                    characteristic: get_current_pak_characteristics(file_list),
-                    obfuscated,
-                };
-                vecs.push(entry);
+        for entry in WalkDir::new(&self.game_path)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_file())
+        {
+            let path = entry.path();
+            let Some((enabled, is_mod_file)) = mod_file_state(path) else {
+                continue;
+            };
+            if !is_mod_file {
+                continue;
             }
-            self.pak_files = vecs;
-            if let Some(idx) = self.current_pak_file_idx {
-                if let Some(entry) = self.pak_files.get(idx) {
-                    self.table = Some(FileTable::new(&entry.reader, &entry.path));
-                } else {
-                    self.current_pak_file_idx = None;
-                    self.table = None;
+
+            let Some(signature) = mod_file_signature(path) else {
+                warn!(
+                    file_name = %path.file_name().and_then(|name| name.to_str()).unwrap_or("<unknown>"),
+                    "Skipping mod with unreadable metadata"
+                );
+                continue;
+            };
+            let identity = normalized_mod_identity_string(path);
+            let utoc_path = path.with_extension("utoc");
+            let is_iostore = utoc_path.exists();
+            let obfuscated = if is_iostore {
+                match is_iostore_obfuscated(&utoc_path) {
+                    Ok(value) => value.to_string(),
+                    Err(e) => {
+                        warn!(error = %e, "Failed to read IoStore obfuscation flag");
+                        "Unknown".to_string()
+                    }
                 }
             } else {
+                "false".to_string()
+            };
+
+            let cached = cache_by_identity
+                .get(&identity)
+                .filter(|entry| entry.signature == signature);
+            let (category, characteristic, metadata_pending, file_count) = match cached {
+                Some(entry) => (
+                    entry.category.clone(),
+                    entry.characteristic.clone(),
+                    false,
+                    entry.file_count,
+                ),
+                None => {
+                    jobs.push(MetadataJob {
+                        generation,
+                        path: path.to_path_buf(),
+                        identity: identity.clone(),
+                        signature,
+                        obfuscated: obfuscated.clone(),
+                        is_iostore,
+                    });
+                    (
+                        "Pending".to_string(),
+                        "Pending".to_string(),
+                        true,
+                        None,
+                    )
+                }
+            };
+
+            next_entries.push(ModEntry {
+                path: path.to_path_buf(),
+                enabled,
+                is_iostore,
+                signature,
+                category,
+                characteristic,
+                obfuscated,
+                metadata_pending,
+                file_count,
+            });
+        }
+
+        self.pak_files = next_entries;
+        self.current_pak_file_idx = selected_identity
+            .and_then(|identity| {
+                self.pak_files
+                    .iter()
+                    .position(|entry| normalized_mod_identity_string(&entry.path) == identity)
+            });
+        if self.current_pak_file_idx.is_none() {
+            self.table = None;
+            self.selected_pak_details = None;
+        }
+
+        self.start_metadata_worker(generation, jobs);
+        self.prune_metadata_cache();
+        info!(mod_entries = self.pak_files.len(), "Loaded mod entries from fast scan");
+    }
+
+    fn start_metadata_worker(&mut self, generation: u64, jobs: Vec<MetadataJob>) {
+        if let Some(cancel) = &self.metadata_cancel {
+            cancel.store(true, Ordering::Relaxed);
+        }
+
+        if jobs.is_empty() {
+            self.metadata_receiver = None;
+            self.metadata_cancel = None;
+            return;
+        }
+
+        let (tx, rx) = channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.metadata_receiver = Some(rx);
+        self.metadata_cancel = Some(cancel.clone());
+        std::thread::spawn(move || {
+            for job in jobs {
+                if cancel.load(Ordering::Relaxed) {
+                    return;
+                }
+                match classify_mod_metadata(&job) {
+                    Ok(result) => {
+                        if tx.send(MetadataMessage::Entry(result)).is_err() {
+                            return;
+                        }
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Failed to classify mod metadata");
+                    }
+                }
+            }
+            if !cancel.load(Ordering::Relaxed) {
+                let _ = tx.send(MetadataMessage::Done(generation));
+            }
+        });
+    }
+
+    fn process_metadata_messages(&mut self, ctx: &egui::Context) {
+        let mut finished_generation = None;
+        let mut received_entry = false;
+        let mut messages = Vec::new();
+
+        if let Some(receiver) = &self.metadata_receiver {
+            while let Ok(message) = receiver.try_recv() {
+                messages.push(message);
+            }
+        }
+
+        for message in messages {
+            match message {
+                MetadataMessage::Entry(result) => {
+                    if result.generation != self.metadata_generation {
+                        continue;
+                    }
+                    self.apply_metadata_result(result);
+                    received_entry = true;
+                }
+                MetadataMessage::Done(generation) => {
+                    if generation == self.metadata_generation {
+                        finished_generation = Some(generation);
+                    }
+                }
+            }
+        }
+
+        if received_entry {
+            ctx.request_repaint();
+        }
+
+        if finished_generation.is_some() {
+            self.metadata_receiver = None;
+            self.metadata_cancel = None;
+            if self.metadata_cache_dirty {
+                if let Err(e) = self.save_state() {
+                    warn!(error = %e, "Failed to save metadata cache");
+                }
+                self.metadata_cache_dirty = false;
+            }
+        }
+    }
+
+    fn apply_metadata_result(&mut self, result: MetadataResult) {
+        if let Some(entry) = self
+            .pak_files
+            .iter_mut()
+            .find(|entry| normalized_mod_identity_string(&entry.path) == result.identity)
+        {
+            if entry.signature != result.signature {
+                return;
+            }
+            entry.category = result.category.clone();
+            entry.characteristic = result.characteristic.clone();
+            entry.obfuscated = result.obfuscated.clone();
+            entry.metadata_pending = false;
+            entry.file_count = result.file_count;
+        }
+
+        let cache_entry = ModMetadataCacheEntry {
+            identity: result.identity.clone(),
+            signature: result.signature,
+            category: result.category,
+            characteristic: result.characteristic,
+            obfuscated: result.obfuscated,
+            file_count: result.file_count,
+        };
+
+        if let Some(existing) = self
+            .mod_metadata_cache
+            .iter_mut()
+            .find(|entry| entry.identity == result.identity)
+        {
+            *existing = cache_entry;
+        } else {
+            self.mod_metadata_cache.push(cache_entry);
+        }
+        self.metadata_cache_dirty = true;
+    }
+
+    fn prune_metadata_cache(&mut self) {
+        let active = self
+            .pak_files
+            .iter()
+            .map(|entry| normalized_mod_identity_string(&entry.path))
+            .collect::<std::collections::HashSet<_>>();
+        let before = self.mod_metadata_cache.len();
+        self.mod_metadata_cache
+            .retain(|entry| active.contains(&entry.identity));
+        if self.mod_metadata_cache.len() != before {
+            self.metadata_cache_dirty = true;
+        }
+    }
+
+    fn open_pak_reader(pak_path: &Path) -> Result<PakReader, String> {
+        let mut builder = repak::PakBuilder::new();
+        builder = builder.key(AES_KEY.clone().0);
+        let file = File::open(pak_path)
+            .map_err(|e| format!("Failed to open {}: {e}", pak_path.display()))?;
+        builder
+            .reader(&mut BufReader::new(file))
+            .map_err(|e| format!("Failed to read {}: {e}", pak_path.display()))
+    }
+
+    fn select_mod(&mut self, idx: usize) {
+        let Some(entry) = self.pak_files.get(idx) else {
+            return;
+        };
+        let pak_path = entry.path.clone();
+        self.current_pak_file_idx = Some(idx);
+        match Self::open_pak_reader(&pak_path) {
+            Ok(reader) => {
+                self.selected_pak_details = Some(SelectedPakDetailsState::Loaded(
+                    SelectedPakDetails {
+                        path: pak_path.clone(),
+                        mount_point: reader.mount_point().to_string(),
+                        path_hash_seed: format!("{:?}", reader.path_hash_seed()),
+                        version: format!("{:?}", reader.version()),
+                    },
+                ));
+                self.table = Some(FileTable::new(&reader, &pak_path));
+            }
+            Err(error) => {
+                self.selected_pak_details =
+                    Some(SelectedPakDetailsState::Failed { path: pak_path, error });
                 self.table = None;
             }
-            info!(mod_entries = self.pak_files.len(), "Loaded mod entries");
         }
     }
 
-    fn files_for_category(pak: &PakReader, pak_path: &Path) -> Vec<String> {
-        let mut utoc_path = pak_path.to_path_buf();
-        utoc_path.set_extension("utoc");
-
-        if utoc_path.exists() {
-            read_utoc(&utoc_path, pak, pak_path)
-                .iter()
-                .map(|entry| entry.file_path.clone())
-                .collect()
-        } else {
-            pak.files()
-        }
-    }
-
-    #[instrument(skip(self), fields(game_path = ?self.game_path))]
+    #[instrument(skip(self), fields(game_path_exists = self.game_path.exists()))]
     fn restart_game_path_watcher(&mut self) {
         self.watcher = None;
         let Some(tx) = self.watcher_tx.clone() else {
@@ -336,12 +605,12 @@ impl RepakModManager {
 
         if self.game_path.exists() {
             if let Err(e) = watcher.watch(&self.game_path, RecursiveMode::Recursive) {
-                warn!(error = %e, path = %self.game_path.to_string_lossy(), "Failed to watch game path");
+                warn!(error = %e, "Failed to watch game path");
                 return;
             }
-            info!(path = %self.game_path.to_string_lossy(), "Watching game path for changes");
+            info!("Watching game path for changes");
         } else {
-            warn!(path = %self.game_path.to_string_lossy(), "Game path does not exist; watcher not started");
+            warn!("Game path does not exist; watcher not started");
         }
 
         self.watcher = Some(watcher);
@@ -390,28 +659,46 @@ impl RepakModManager {
         let Some(current_mod) = self.pak_files.get(current_idx) else {
             return;
         };
-        let pak = &current_mod.reader;
-        let pak_path = current_mod.path.clone();
         let obfuscated = current_mod.obfuscated.clone();
         let characteristic = current_mod.characteristic.clone();
 
         egui::CollapsingHeader::new("Pak details")
             .default_open(true)
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.add(Label::new(RichText::new("Mount Point: ").strong()));
-                    ui.add(Label::new(pak.mount_point().to_string()));
-                });
+                match &self.selected_pak_details {
+                    Some(SelectedPakDetailsState::Loaded(details))
+                        if same_mod_identity(&details.path, &current_mod.path) =>
+                    {
+                        ui.horizontal(|ui| {
+                            ui.add(Label::new(RichText::new("Mount Point: ").strong()));
+                            ui.add(Label::new(details.mount_point.clone()));
+                        });
 
-                ui.horizontal(|ui| {
-                    ui.add(Label::new(RichText::new("Path Hash Seed: ").strong()));
-                    ui.add(Label::new(format!("{:?}", pak.path_hash_seed())));
-                });
+                        ui.horizontal(|ui| {
+                            ui.add(Label::new(RichText::new("Path Hash Seed: ").strong()));
+                            ui.add(Label::new(details.path_hash_seed.clone()));
+                        });
 
-                ui.horizontal(|ui| {
-                    ui.add(Label::new(RichText::new("Version: ").strong()));
-                    ui.add(Label::new(format!("{:?}", pak.version())));
-                });
+                        ui.horizontal(|ui| {
+                            ui.add(Label::new(RichText::new("Version: ").strong()));
+                            ui.add(Label::new(details.version.clone()));
+                        });
+                    }
+                    Some(SelectedPakDetailsState::Failed { path, error })
+                        if same_mod_identity(path, &current_mod.path) =>
+                    {
+                        ui.horizontal(|ui| {
+                            ui.add(Label::new(RichText::new("Pak reader: ").strong()));
+                            ui.add(Label::new(error.clone()));
+                        });
+                    }
+                    _ => {
+                        ui.horizontal(|ui| {
+                            ui.add(Label::new(RichText::new("Pak reader: ").strong()));
+                            ui.add(Label::new("Select the mod again to load details"));
+                        });
+                    }
+                }
 
                 ui.horizontal(|ui| {
                     ui.add(Label::new(RichText::new("Obfuscated: ").strong()));
@@ -426,9 +713,6 @@ impl RepakModManager {
             ));
             ui.add(Label::new(characteristic));
         });
-        if self.table.is_none() {
-            self.table = Some(FileTable::new(pak, &pak_path));
-        }
     }
     #[instrument(skip(self, ui))]
     fn show_pak_files_in_dir(&mut self, ui: &mut egui::Ui) {
@@ -546,9 +830,7 @@ impl RepakModManager {
                             continue;
                         }
 
-                        let mut utoc_path = pak_path.clone();
-                        utoc_path.set_extension("utoc");
-                        let is_iostore = utoc_path.exists();
+                        let is_iostore = self.pak_files[i].is_iostore;
                         let is_selected = self.current_pak_file_idx == Some(i);
                         let row_fill = if is_selected {
                             Color32::from_rgb(54, 28, 35)
@@ -646,10 +928,7 @@ impl RepakModManager {
                                                 pak_file.path = new_path;
                                                 pak_file.enabled = enabled;
                                                 if self.current_pak_file_idx == Some(i) {
-                                                    self.table = Some(FileTable::new(
-                                                        &pak_file.reader,
-                                                        &pak_file.path,
-                                                    ));
+                                                    self.select_mod(i);
                                                 }
                                             } else {
                                                 self.pak_files[i].enabled = !enabled;
@@ -676,9 +955,7 @@ impl RepakModManager {
 
 
                         if row_response.clicked() && !toggler_clicked{
-                            self.current_pak_file_idx = Some(i);
-                            let pak_file = &self.pak_files[i];
-                            self.table = Some(FileTable::new(&pak_file.reader, &pak_file.path));
+                            self.select_mod(i);
                         }
 
                         row_response.context_menu(|ui| {
@@ -722,7 +999,11 @@ impl RepakModManager {
         self.show_tag_context_menu(ui, pak_path);
         ui.separator();
         if ui.button("Extract pak to directory").clicked() {
-            info!(mod_path = ?pak_path, "Preparing extraction");
+            info!(
+                mod_name = %pak_path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("<unknown>"),
+                is_iostore,
+                "Preparing extraction"
+            );
             self.current_pak_file_idx = Some(i);
             let dir = rfd::FileDialog::new().pick_folder();
             if let Some(dir) = dir {
@@ -733,7 +1014,7 @@ impl RepakModManager {
                     .to_string();
                 let to_create = dir.join(&mod_name);
                 if let Err(e) = fs::create_dir_all(&to_create) {
-                    error!(path = ?to_create, error = %e, "Failed to create extraction directory");
+                    error!(mod_name = %mod_name, error = %e, "Failed to create extraction directory");
                     return;
                 }
 
@@ -773,22 +1054,22 @@ impl RepakModManager {
                         error!(error = %e, "Failed to extract IoStore mod");
                     }
                 } else {
-                    let Some(pak_file) = self.pak_files.get(i) else {
-                        warn!(
-                            mod_index = i,
-                            "Cannot extract mod because the row no longer exists"
-                        );
-                        return;
+                    let reader = match Self::open_pak_reader(pak_path) {
+                        Ok(reader) => reader,
+                        Err(e) => {
+                            error!(mod_name = %mod_name, error = %e, "Failed to open mod for extraction");
+                            return;
+                        }
                     };
                     let installable_mod = InstallableMod {
                         mod_name: mod_name.clone(),
                         mod_type: "".to_string(),
-                        reader: Option::from(pak_file.reader.clone()),
+                        reader: Option::from(reader),
                         mod_path: pak_path.to_path_buf(),
                         ..Default::default()
                     };
                     if let Err(e) = extract_pak_to_dir(&installable_mod, to_create) {
-                        error!(mod_path = ?pak_path, error = %e, "Failed to extract mod");
+                        error!(mod_name = %mod_name, error = %e, "Failed to extract mod");
                     }
                 }
             }
@@ -829,6 +1110,8 @@ impl RepakModManager {
                 warn!(error = %e, "Failed to save tag cleanup after delete");
             }
             self.current_pak_file_idx = None;
+            self.table = None;
+            self.selected_pak_details = None;
         }
     }
 
@@ -894,6 +1177,7 @@ impl RepakModManager {
             .pak_files
             .iter()
             .map(|entry| entry.category.clone())
+            .filter(|category| category != "Pending")
             .collect::<Vec<_>>();
         categories.sort();
         categories.dedup();
@@ -968,10 +1252,17 @@ impl RepakModManager {
             .unwrap_or_else(|| PathBuf::from("."))
             .join("repak_manager");
 
-        debug!("Config path: {}", path.to_string_lossy());
+
+
         if !path.exists() {
-            fs::create_dir_all(&path).unwrap();
-            info!("Created config directory: {}", path.to_string_lossy());
+            if let Err(e) = fs::create_dir_all(&path) {
+                warn!(
+                    error = %e,
+                    "Failed to create config directory"
+                );
+            } else {
+                debug!("Created config directory");
+            }
         }
 
         path.push("repak_mod_manager.json");
@@ -985,7 +1276,7 @@ impl RepakModManager {
         let path = Self::config_path();
         let mut persist_config = false;
         let mut shit = if path.exists() {
-            info!("Loading config: {}", path.to_string_lossy());
+            info!("Loading config");
             let data = fs::read_to_string(path)?;
             let mut config: Self = serde_json::from_str(&data)?;
 
@@ -995,12 +1286,11 @@ impl RepakModManager {
                     let mods_path = path.join("~mods").clean();
                     if let Err(e) = fs::create_dir_all(&mods_path) {
                         warn!(
-                            path = %mods_path.to_string_lossy(),
                             error = %e,
                             "Failed to create detected mods directory"
                         );
                     } else {
-                        info!(path = %mods_path.to_string_lossy(), "Using detected Steam mods path");
+                        info!(detected_mods_path_exists = mods_path.exists(), "Using detected Steam mods path");
                     }
                     config.game_path = mods_path;
                     persist_config = true;
@@ -1016,8 +1306,6 @@ impl RepakModManager {
             debug!("Setting font size: {}", config.default_font_size);
             set_custom_font_size(&ctx.egui_ctx, config.default_font_size);
 
-            info!("Loading mods: {}", config.game_path.to_string_lossy());
-            config.collect_pak_files();
             config.set_game_pakchunk_path();
             let mut show_welcome = false;
             if let Some(ref version) = config.version {
@@ -1035,10 +1323,7 @@ impl RepakModManager {
 
             Ok(config)
         } else {
-            info!(
-                "First Launch creating new directory: {}",
-                path.to_string_lossy()
-            );
+            info!("First launch creating config");
             let mut x = Self::new(ctx);
             x.welcome_screen = Some(ShowWelcome {});
             x.hide_welcome = false;
@@ -1059,11 +1344,10 @@ impl RepakModManager {
 
         shit
     }
-    #[instrument(skip(self))]
     fn save_state(&self) -> std::io::Result<()> {
         let path = Self::config_path();
         let json = serde_json::to_string_pretty(self)?;
-        info!("Saving config: {}", path.to_string_lossy());
+        info!("Saving config");
         fs::write(path, json)?;
         Ok(())
     }
@@ -1110,7 +1394,11 @@ impl RepakModManager {
                 });
 
                 if all_valid {
-                    info!(dropped_items = dropped_files.len(), game_path = ?self.game_path, "Processing dropped items");
+                    info!(
+                        dropped_items = dropped_files.len(),
+                        game_path_exists = self.game_path.exists(),
+                        "Processing dropped items"
+                    );
                     let mods = map_dropped_file_to_mods(&dropped_files);
                     if mods.is_empty() {
                         error!("No installable mods found in dropped items");
@@ -1118,8 +1406,12 @@ impl RepakModManager {
                     }
                     self.file_drop_viewport_open = true;
                     debug!(installable_mods = mods.len(), "Prepared installable mods from dropped items");
-                    self.install_mod_dialog =
-                        Some(ModInstallRequest::new(mods, self.game_path.clone(),&self.game_chunk_path));
+                    self.install_mod_dialog = Some(ModInstallRequest::new(
+                        mods,
+                        self.game_path.clone(),
+                        &self.game_chunk_path,
+                        &self.kawaii_physics_usmap,
+                    ));
 
                     if let Some(dialog) = &self.install_mod_dialog {
                         trace!("Install dialog payload: {:#?}", dialog.mods);
@@ -1168,6 +1460,7 @@ impl RepakModManager {
                         mods,
                         self.game_path.clone(),
                         &self.game_chunk_path,
+                        &self.kawaii_physics_usmap,
                     ));
                 }
 
@@ -1201,7 +1494,31 @@ impl RepakModManager {
                         mods,
                         self.game_path.clone(),
                         &self.game_chunk_path,
+                        &self.kawaii_physics_usmap,
                     ));
+                }
+                ui.separator();
+                if ui.button("Select Mapping file").clicked() {
+                    ui.close_menu();
+                    if let Some(path) = FileDialog::new()
+                        .set_title("Select mapping file")
+                        .add_filter("Unversioned mapping", &["usmap"])
+                        .pick_file()
+                    {
+                        self.kawaii_physics_usmap = Some(path.clean());
+                        if let Err(e) = self.save_state() {
+                            warn!(error = %e, "Failed to save mapping file path");
+                        }
+                    }
+                }
+                if let Some(path) = &self.kawaii_physics_usmap {
+                    ui.label(format!("Mapping: {}", path.display()));
+                    if ui.button("Clear Mapping file").clicked() {
+                        self.kawaii_physics_usmap = None;
+                        if let Err(e) = self.save_state() {
+                            warn!(error = %e, "Failed to clear mapping file path");
+                        }
+                    }
                 }
                 if ui.button("Quit").clicked() {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -1246,12 +1563,13 @@ impl RepakModManager {
                     if let Some(path) = FileDialog::new().pick_folder() {
                         self.game_path = path.clean();
                         if let Err(e) = fs::create_dir_all(&self.game_path) {
-                            warn!(error = %e, path = %self.game_path.to_string_lossy(), "Failed to create selected mod directory");
+                            warn!(error = %e, "Failed to create selected mod directory");
                         }
                         self.set_game_pakchunk_path();
                         self.launch_game_paths = None;
                         self.current_pak_file_idx = None;
                         self.table = None;
+                        self.selected_pak_details = None;
                         self.collect_pak_files();
                         self.restart_game_path_watcher();
                         if let Err(e) = self.save_state() {
@@ -1262,24 +1580,24 @@ impl RepakModManager {
                 flex_ui.add_ui(item(), |ui| {
                     let x = ui.add_enabled(self.game_path.exists(), Button::new("Open mod folder"));
                     if x.clicked() {
-                        info!(path = %self.game_path.to_string_lossy(), "Opening mod folder");
+                        info!(mod_folder_exists = self.game_path.exists(), "Opening mod folder");
                         #[cfg(target_os = "windows")]
                         {
                             if let Err(e) = crate::launch_game::shell_open_path(&self.game_path) {
-                                error!(error = %e, path = %self.game_path.display(), "Failed to open folder");
+                                error!(error = %e, "Failed to open folder");
                                 rfd::MessageDialog::new()
                                     .set_buttons(MessageButtons::Ok)
                                     .set_title("Failed to open mod folder")
                                     .set_description(e)
                                     .show();
                             } else {
-                                info!(path = %self.game_path.display(), "Opened mod folder");
+                                info!("Opened mod folder");
                             }
                         }
 
                         #[cfg(target_os = "linux")]
                         {
-                            debug!("Opening mod folder: {}", self.game_path.to_string_lossy());
+                            debug!(mod_folder_exists = self.game_path.exists(), "Opening mod folder");
                             let _ = std::process::Command::new("xdg-open")
                                 .arg(self.game_path.to_string_lossy().to_string())
                                 .spawn();
@@ -1322,7 +1640,7 @@ impl RepakModManager {
             });
     }
 
-    #[instrument(fields(pak_path = ?pak_path))]
+    #[instrument(skip(pak_path), fields(has_utoc = pak_path.with_extension("utoc").exists(), has_ucas = pak_path.with_extension("ucas").exists()))]
     fn delete_mod_files(pak_path: &Path) -> std::io::Result<()> {
         let utoc_path = pak_path.with_extension("utoc");
         let ucas_path = pak_path.with_extension("ucas");
@@ -1332,18 +1650,24 @@ impl RepakModManager {
 
         for file in files_to_delete {
             if !file.exists() {
-                debug!(?file, "Skipping missing companion file");
+                debug!(
+                    file_ext = %file.extension().and_then(|ext| ext.to_str()).unwrap_or("<none>"),
+                    "Skipping missing companion file"
+                );
                 continue;
             }
 
             fs::remove_file(&file)?;
-            info!(?file, "Deleted companion file");
+            info!(
+                file_ext = %file.extension().and_then(|ext| ext.to_str()).unwrap_or("<none>"),
+                "Deleted companion file"
+            );
         }
 
         Ok(())
     }
 
-    #[instrument(fields(current_path = ?current_path, enable_mod))]
+    #[instrument(skip(current_path), fields(enable_mod, source_ext = %current_path.extension().and_then(|ext| ext.to_str()).unwrap_or("<none>")))]
     fn toggle_mod_file(current_path: &PathBuf, enable_mod: bool) -> Option<PathBuf> {
         let destination_path = if enable_mod {
             current_path.with_extension("pak")
@@ -1351,11 +1675,17 @@ impl RepakModManager {
             current_path.with_extension("bak_repak")
         };
 
-        info!(destination_path = ?destination_path, "Toggling mod");
+        info!(
+            destination_ext = %destination_path.extension().and_then(|ext| ext.to_str()).unwrap_or("<none>"),
+            "Toggling mod"
+        );
 
         match std::fs::rename(current_path, &destination_path) {
             Ok(_) => {
-                info!(destination_path = ?destination_path, "Toggle complete");
+                info!(
+                    destination_ext = %destination_path.extension().and_then(|ext| ext.to_str()).unwrap_or("<none>"),
+                    "Toggle complete"
+                );
                 Some(destination_path)
             }
             Err(e) => {
@@ -1378,6 +1708,7 @@ impl eframe::App for RepakModManager {
                 welcome.welcome_screen(ctx, &mut self.hide_welcome);
             }
         }
+        self.process_metadata_messages(ctx);
 
         let mut collect_pak = false;
 
@@ -1394,13 +1725,22 @@ impl eframe::App for RepakModManager {
                         }
                         EventKind::Other | EventKind::Access(_) => {}
                         _ => {
-                            collect_pak = true;
+                            self.pending_refresh_at =
+                                Some(Instant::now() + Duration::from_millis(500));
                         }
                     }
                 }
             }
         }
         // if install_mod_dialog is open we dont want to listen to events
+
+        if self
+            .pending_refresh_at
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            self.pending_refresh_at = None;
+            collect_pak = true;
+        }
 
         if collect_pak {
             trace!("Filesystem watcher requested mod refresh");
@@ -1445,7 +1785,9 @@ impl eframe::App for RepakModManager {
         });
 
         if ctx.input(|i| i.viewport().close_requested()) {
-            self.save_state().unwrap();
+            if let Err(e) = self.save_state() {
+                warn!(error = %e, "Failed to save config while closing");
+            }
         }
         self.check_drop(ctx);
         if let Some(ref mut install_mod) = self.install_mod_dialog {
@@ -1460,6 +1802,75 @@ fn normalize_mod_display_name(name: &str) -> String {
     name.replace("_9999999_P", "").replace("_999999_P", "")
 }
 
+fn classify_mod_metadata(job: &MetadataJob) -> Result<MetadataResult, String> {
+    let files = files_for_metadata(&job.path, job.is_iostore)?;
+    let file_count = Some(files.len());
+    Ok(MetadataResult {
+        generation: job.generation,
+        identity: job.identity.clone(),
+        signature: job.signature,
+        category: detect_mod_category(&files),
+        characteristic: get_current_pak_characteristics(files),
+        obfuscated: job.obfuscated.clone(),
+        file_count,
+    })
+}
+
+fn files_for_metadata(pak_path: &Path, is_iostore: bool) -> Result<Vec<String>, String> {
+    if is_iostore {
+        return read_utoc_package_names(&pak_path.with_extension("utoc"));
+    }
+
+    let mut builder = repak::PakBuilder::new();
+    builder = builder.key(AES_KEY.clone().0);
+    let file = File::open(pak_path).map_err(|e| format!("Failed to open mod: {e}"))?;
+    let pak = builder
+        .reader(&mut BufReader::new(file))
+        .map_err(|e| format!("Failed to read mod: {e}"))?;
+    Ok(pak.files())
+}
+
+fn mod_file_state(path: &Path) -> Option<(bool, bool)> {
+    match path.extension().and_then(|extension| extension.to_str()) {
+        Some("pak") => Some((true, true)),
+        Some("pak_disabled") | Some("bak_repak") => Some((false, true)),
+        _ => None,
+    }
+}
+
+fn mod_file_signature(path: &Path) -> Option<ModFileSignature> {
+    let mut size = 0u64;
+    let mut modified_secs = 0u64;
+    let companions = [
+        path.to_path_buf(),
+        path.with_extension("utoc"),
+        path.with_extension("ucas"),
+    ];
+
+    for companion in companions {
+        if !companion.exists() {
+            continue;
+        }
+        let metadata = fs::metadata(&companion).ok()?;
+        size = size.saturating_add(metadata.len());
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(system_time_to_secs)
+            .unwrap_or_default();
+        modified_secs = modified_secs.max(modified);
+    }
+
+    Some(ModFileSignature {
+        size,
+        modified_secs,
+    })
+}
+
+fn system_time_to_secs(time: SystemTime) -> Option<u64> {
+    time.duration_since(UNIX_EPOCH).ok().map(|duration| duration.as_secs())
+}
+
 fn has_mod_suffix(name: &str) -> bool {
     name.ends_with("_9999999_P") || name.ends_with("_999999_P")
 }
@@ -1471,7 +1882,7 @@ fn detect_mod_category(files: &[String]) -> String {
             .and_then(|name| name.to_str())
             .unwrap_or_default()
             .to_ascii_lowercase();
-        name.starts_with("sk_")
+        name.starts_with("sk_") || name.starts_with("sm_")
     }) {
         return "Mesh".to_string();
     }
@@ -1608,4 +2019,10 @@ fn normalized_mod_identity(path: &Path) -> PathBuf {
         .unwrap_or(file_name);
 
     parent.join(stem)
+}
+
+fn normalized_mod_identity_string(path: &Path) -> String {
+    normalized_mod_identity(path)
+        .to_string_lossy()
+        .to_ascii_lowercase()
 }

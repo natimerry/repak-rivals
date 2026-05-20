@@ -512,6 +512,7 @@ fn main() {
                     mod_dir.to_path_buf(),
                     paths[i].clone(),
                     count,
+                    None,
                 )
                 .expect("Failed to convert directory");
             }

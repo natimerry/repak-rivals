@@ -111,6 +111,7 @@ pub struct ModInstallRequest {
     pub joined_thread: Option<thread::JoinHandle<()>>,
     pub stop_thread: Arc<AtomicBool>,
     pub chunkdir: Option<PathBuf>,
+    pub kawaii_physics_usmap: Option<PathBuf>,
 }
 impl ModInstallRequest {
     #[instrument(skip(mods), fields(mod_count = mods.len(), mod_directory = ?mod_directory))]
@@ -118,6 +119,7 @@ impl ModInstallRequest {
         mods: Vec<InstallableMod>,
         mod_directory: PathBuf,
         chunkdir: &Option<PathBuf>,
+        kawaii_physics_usmap: &Option<PathBuf>,
     ) -> Self {
         let len = mods
             .iter()
@@ -127,6 +129,7 @@ impl ModInstallRequest {
             .max(1);
         info!("Created install request");
         let chunkdir = chunkdir.clone();
+        let kawaii_physics_usmap = kawaii_physics_usmap.clone();
         Self {
             animate: false,
             mods,
@@ -136,6 +139,7 @@ impl ModInstallRequest {
             joined_thread: None,
             stop_thread: Arc::new(AtomicBool::new(false)),
             chunkdir,
+            kawaii_physics_usmap,
         }
     }
 }
@@ -211,6 +215,7 @@ impl ModInstallRequest {
                                     let new_atomic = self.installed_mods_cbk.clone();
                                     let new_stop_thread = self.stop_thread.clone();
                                     let chunkdir = self.chunkdir.clone();
+                                    let kawaii_physics_usmap = self.kawaii_physics_usmap.clone();
                                     self.joined_thread = Some(std::thread::spawn(move || {
                                         install_mods_in_viewport(
                                             &mut mods,
@@ -218,6 +223,7 @@ impl ModInstallRequest {
                                             new_atomic,
                                             &new_stop_thread,
                                             &chunkdir,
+                                            &kawaii_physics_usmap,
                                         );
                                     }));
                                     self.animate = true;

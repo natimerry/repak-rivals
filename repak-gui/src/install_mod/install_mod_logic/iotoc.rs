@@ -56,6 +56,7 @@ pub fn convert_directory_to_iostore(
     mod_dir: PathBuf,
     to_pak_dir: PathBuf,
     packed_files_count: Arc<AtomicI32>,
+    kawaii_physics_usmap: Option<PathBuf>,
 ) -> Result<(), repak::Error> {
     let mod_type = pak.mod_type.clone();
     if mod_type == "Audio" || mod_type == "Movies" {
@@ -89,6 +90,9 @@ pub fn convert_directory_to_iostore(
 
     let mut config = Config {
         container_header_version_override: None,
+        port_kawaii_physics: true,
+        kawaii_physics_usmap: kawaii_physics_usmap,
+        kawaii_physics_force_rebuild: true,
         ..Default::default()
     };
 
@@ -169,6 +173,8 @@ pub fn convert_directory_to_iostore(
 
     // now generate the fake pak file
 }
+
+
 
 #[instrument(skip_all)]
 pub fn to_legacy_uasset(
