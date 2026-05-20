@@ -5,3 +5,6 @@
 	path = retoc-rivals
 	url = https://github.com/natimerry/retoc-rivals
 	branch = master
+[submodule "UAssetAPI"]
+	path = UAssetAPI
+	url = https://github.com/natimerry/UAssetAPI-Kawaii
