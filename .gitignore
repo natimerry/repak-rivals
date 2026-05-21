@@ -5,6 +5,7 @@
 /Content/
 .idea
 /repak-gui/cross/
+/usmap
 /latest.log
 /repak/tests/pack/patched_files
 /repak-gui/latest.log
@@ -12,6 +13,7 @@
 /imhex_patterns/*.bin
 mesh_dir_list.txt
 data/character_data.json
+/usmap/
 
 # .NET build outputs
 **/bin/
