@@ -87,8 +87,11 @@ fn build_to_legacy_filter(utoc_path: PathBuf, config: Arc<retoc::Config>) -> Vec
             let mut set = HashSet::new();
 
             for entry in &ops.oplog.entries {
-                let package_name = entry.packagestoreentry.packagename.trim();
-                if let Some(filter_path) = resolve_package_filter_path(package_name) {
+                let Some(package_data) = entry.packagedata.first() else {
+                    continue;
+                };
+                let package_path = package_data.filename.trim();
+                if let Some(filter_path) = resolve_package_filter_path(package_path) {
                     set.insert(filter_path);
                 }
             }
