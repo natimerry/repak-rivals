@@ -477,17 +477,22 @@ fn run_fix_kawaii_physics_cli() -> Result<(), String> {
     }
 
     println!("Found {} installed IoStore mods", paks.len());
+    println!("Extracting installed IoStore mods to legacy assets...");
     let extracted_temp =
         tempfile::tempdir().map_err(|e| format!("Failed to create temp directory: {e}"))?;
     let extracted_dirs =
         to_legacy_uasset_fast_batch(&paks, extracted_temp.path().to_path_buf(), game_paks_dir)
             .map_err(|e| format!("Batch to-legacy extraction failed: {e}"))?;
+    println!(
+        "Extracted {} mods. Rebuilding fixed IoStore mods...",
+        extracted_dirs.len()
+    );
 
     let fixed_mods_dir = PathBuf::from("./fixed-mods");
     fs::create_dir_all(&fixed_mods_dir)
         .map_err(|e| format!("Failed to create {}: {e}", fixed_mods_dir.display()))?;
 
-    for extracted_dir in extracted_dirs {
+    for (idx, extracted_dir) in extracted_dirs.into_iter().enumerate() {
         let mod_name = extracted_dir
             .file_stem()
             .and_then(|name| name.to_str())
@@ -498,6 +503,7 @@ fn run_fix_kawaii_physics_cli() -> Result<(), String> {
                 )
             })?
             .to_string();
+        println!("[{}/{}] Rebuilding {}", idx + 1, paks.len(), mod_name);
         let mod_output_dir = fixed_mods_dir.join(&mod_name);
         fs::create_dir_all(&mod_output_dir).map_err(|e| {
             format!(
@@ -552,6 +558,19 @@ fn main() {
     std::panic::set_hook(Box::new(move |info| {
         custom_panic(info.into());
     }));
+
+    let exe_path = std::env::current_exe().expect("Failed to get executable path");
+    let log_path = exe_path
+        .parent()
+        .expect("Failed to get executable directory")
+        .join("latest.log");
+    let _log_guard = init_tracing(&log_path);
+
+    info!(
+        "Logger initialized at {:?}; egui-family targets restricted to info and above",
+        log_path
+    );
+
     #[cfg(not(debug_assertions))]
     if !fix_kawaii_physics_cli {
         check_repak_rivals_version(env!("CARGO_PKG_VERSION"));
@@ -728,18 +747,6 @@ fn main() {
         std::env::set_var("WINIT_UNIX_BACKEND", "x11");
         std::env::remove_var("WAYLAND_DISPLAY");
     }
-
-    let exe_path = std::env::current_exe().expect("Failed to get executable path");
-    let log_path = exe_path
-        .parent()
-        .expect("Failed to get executable directory")
-        .join("latest.log");
-    let _log_guard = init_tracing(&log_path);
-
-    info!(
-        "Logger initialized at {:?}; egui-family targets restricted to info and above",
-        log_path
-    );
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
