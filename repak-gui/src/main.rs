@@ -4,6 +4,7 @@ extern crate core;
 
 mod file_table;
 mod install_mod;
+mod install_terminal;
 mod launch_game;
 mod main_ui;
 mod utils;
@@ -186,6 +187,17 @@ fn is_console() -> bool {
         let count = GetConsoleProcessList(buffer.as_mut_ptr(), 1);
         count != 1
     }
+}
+
+#[cfg(target_os = "windows")]
+pub fn has_attached_console() -> bool {
+    unsafe { !win_console::GetConsoleWindow().is_null() }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn has_attached_console() -> bool {
+    use std::io::IsTerminal;
+    std::io::stdout().is_terminal() || std::io::stderr().is_terminal()
 }
 #[cfg(target_os = "windows")]
 #[link(name = "Kernel32")]
@@ -766,6 +778,8 @@ fn init_tracing(log_path: &std::path::Path) -> tracing_appender::non_blocking::W
 
     let file_appender = tracing_appender::rolling::never(log_directory, log_filename);
     let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
+    let file_writer = install_terminal::StripAnsiMakeWriter::new(file_writer);
+    let terminal_buffer_writer = install_terminal::terminal_make_writer();
 
     let app_filter = Targets::default()
         .with_default(LevelFilter::DEBUG)
@@ -806,6 +820,13 @@ fn init_tracing(log_path: &std::path::Path) -> tracing_appender::non_blocking::W
                 .with_writer(std::io::stderr)
                 .with_ansi(true)
                 .with_filter(egui_filter.clone()),
+        )
+        .with(
+            fmt::layer()
+                .event_format(fmt::format().with_target(false).with_ansi(true))
+                .with_writer(terminal_buffer_writer)
+                .with_ansi(true)
+                .with_filter(app_filter.clone()),
         )
         .with(
             fmt::layer()

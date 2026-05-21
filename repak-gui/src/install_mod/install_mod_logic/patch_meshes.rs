@@ -1,4 +1,3 @@
-use colored::Colorize;
 use log::info;
 use path_slash::PathExt;
 use std::collections::HashSet;
@@ -131,10 +130,7 @@ pub fn mesh_patch(paths: &mut Vec<PathBuf>, mod_dir: &PathBuf) -> Result<(), rep
 
         for i in &patched_files {
             if i.as_str() == *rel_uexp || i.as_str() == *rel_uasset {
-                info!(
-                    "Skipping {} (File has already been patched before)",
-                    i.yellow()
-                );
+                info!("Skipping {} (File has already been patched before)", i);
                 continue 'outer;
             }
         }
@@ -154,7 +150,7 @@ pub fn mesh_patch(paths: &mut Vec<PathBuf>, mod_dir: &PathBuf) -> Result<(), rep
             )),
         )?;
 
-        info!("Processing {}", &uassetfile.to_str().unwrap().yellow());
+        info!("Processing {}", &uassetfile.to_str().unwrap());
         let mut rdr = BufReader::new(File::open(uassetfile.clone())?);
         let (exp_cnt, exp_offset) = fixer.read_uasset(&mut rdr)?;
         fixer.read_exports(&mut rdr, &mut sizes, &mut offsets, exp_offset, exp_cnt)?;

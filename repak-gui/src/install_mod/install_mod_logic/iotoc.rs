@@ -44,6 +44,18 @@ impl retoc::LogProvider for TracingRetocLogProvider {
     }
 }
 
+struct TracingOnlyRetocLogProvider;
+
+impl retoc::LogProvider for TracingOnlyRetocLogProvider {
+    fn log(&self, msg: &str) {
+        if msg.starts_with("[MaterialTags]") {
+            debug!(target: "retoc", "{}", msg);
+        } else {
+            info!(target: "retoc", "{}", msg);
+        }
+    }
+}
+
 fn ensure_mod_name_suffix(name: &str) -> String {
     if name.ends_with(MOD_NAME_SUFFIX) {
         name.to_string()
@@ -366,7 +378,7 @@ pub fn to_legacy_uasset(
     game_paks_dir: PathBuf,
     _packed_files_count: &AtomicI32,
 ) -> Result<(), repak::Error> {
-    retoc::reset_log_provider_to_stdout();
+    retoc::set_log_provider(Arc::new(TracingOnlyRetocLogProvider));
     info!(
         pak = %pak.display(),
         output_dir = %output_dir.display(),
@@ -477,6 +489,7 @@ pub fn to_legacy_uasset_fast(
     mods_dir: PathBuf,
     game_paks_dir: PathBuf,
 ) -> Result<(), repak::Error> {
+    retoc::set_log_provider(Arc::new(TracingOnlyRetocLogProvider));
     info!(
         pak = %pak.display(),
         output_dir = %output_dir.display(),
@@ -549,6 +562,7 @@ pub fn to_legacy_uasset_fast_batch(
     output_dir: PathBuf,
     game_paks_dir: PathBuf,
 ) -> Result<Vec<PathBuf>, repak::Error> {
+    retoc::set_log_provider(Arc::new(TracingOnlyRetocLogProvider));
     let config = to_legacy_config()?;
     let mut items = Vec::new();
     let mut extracted_dirs = Vec::new();

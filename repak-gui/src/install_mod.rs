@@ -26,15 +26,6 @@ use tempfile::tempdir;
 use tracing::{debug, error, info, instrument, warn};
 use walkdir::WalkDir;
 
-#[cfg(all(windows, not(debug_assertions)))]
-fn spawn_install_terminal() {
-    crate::ensure_console();
-    crate::redirect_stdio();
-}
-
-#[cfg(any(not(windows), debug_assertions))]
-fn spawn_install_terminal() {}
-
 fn install_needs_to_legacy_console(mods: &[InstallableMod]) -> bool {
     mods.iter()
         .any(|mods| mods.enabled && mods.iostore && mods.repak)
@@ -106,6 +97,7 @@ pub struct ModInstallRequest {
     pub stop_thread: Arc<AtomicBool>,
     pub chunkdir: Option<PathBuf>,
     pub kawaii_physics_usmap: Option<PathBuf>,
+    show_terminal_progress: bool,
 }
 impl ModInstallRequest {
     #[instrument(skip(mods), fields(mod_count = mods.len(), mod_directory = ?mod_directory))]
@@ -134,6 +126,7 @@ impl ModInstallRequest {
             stop_thread: Arc::new(AtomicBool::new(false)),
             chunkdir,
             kawaii_physics_usmap,
+            show_terminal_progress: false,
         }
     }
 }
@@ -158,6 +151,13 @@ impl ModInstallRequest {
 
     #[instrument(skip(self, ctx, show_callback), fields(mod_count = self.mods.len(), mod_directory = ?self.mod_directory))]
     pub fn new_mod_dialog(&mut self, ctx: &egui::Context, show_callback: &mut bool) {
+        if self.show_terminal_progress {
+            let install_done = self.installed_mods_cbk.load(SeqCst) == -255;
+            if !crate::install_terminal::show_install_terminal(ctx, install_done) {
+                self.show_terminal_progress = false;
+            }
+        }
+
         let viewport_options = egui::ViewportBuilder::default()
             .with_title("Install mods")
             .with_icon(ICON.clone())
@@ -225,8 +225,15 @@ impl ModInstallRequest {
                                     let needs_to_legacy_console =
                                         install_needs_to_legacy_console(&mods);
                                     if needs_to_legacy_console {
-                                        info!("Starting install worker with to-legacy console");
-                                        spawn_install_terminal();
+                                        if crate::has_attached_console() {
+                                            #[cfg(windows)]
+                                            crate::redirect_stdio();
+                                            info!("Starting install worker with attached console");
+                                        } else {
+                                            crate::install_terminal::clear_terminal();
+                                            self.show_terminal_progress = true;
+                                            info!("Starting install worker with egui terminal progress");
+                                        }
                                     } else {
                                         info!("Starting install worker");
                                     }
@@ -252,10 +259,6 @@ impl ModInstallRequest {
                                             &chunkdir,
                                             &kawaii_physics_usmap,
                                         );
-                                        #[cfg(all(windows, not(debug_assertions)))]
-                                        if needs_to_legacy_console {
-                                            crate::free_console();
-                                        }
                                     }));
                                     self.animate = true;
                                 }

@@ -23,8 +23,9 @@ pub(crate) fn ensure_mod_name_suffix(name: &str) -> String {
 
 #[cfg(all(windows, not(debug_assertions)))]
 fn show_to_legacy_console() {
-    crate::ensure_console();
-    crate::redirect_stdio();
+    if crate::has_attached_console() {
+        crate::redirect_stdio();
+    }
 }
 
 #[cfg(all(windows, not(debug_assertions)))]
