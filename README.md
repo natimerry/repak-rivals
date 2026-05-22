@@ -1,96 +1,74 @@
 # repak-rivals
 
-`repak-rivals` is a Marvel Rivals mod packaging and install toolset.
+Marvel Rivals mod packaging, conversion, extraction, inspection, and install toolset.
 
-Use `repak-gui` by default. It is the intended workflow for current Marvel Rivals mods.
+## Use The Right Tool
 
-`repak_cli` is mainly for pak inspection and pak-only workflows. It does not generate `.utoc` / `.ucas`, is not the preferred option for modern Rivals mods, and should only be used if you already understand the packaging constraints.
+| Tool | Use for | Avoid for |
+| --- | --- | --- |
+| `repak-gui` | normal mod install/manage workflow; archives; raw folders; legacy pak repack; IoStore mods | script automation |
+| `retoc-rivals-cli` | scriptable `.pak`/`.utoc`/`.ucas`, archive, directory, manifest, KawaiiPhysics, and conversion workflows | visual mod management |
+| `repak_cli` | pak-only legacy inspection/extraction/packing | modern Rivals IoStore output (`.utoc`/`.ucas`) |
 
-## Install
+Modern Marvel Rivals mods normally install into:
 
-1. Download the latest release from Nexus Mods: https://www.nexusmods.com/marvelrivals/mods/1717
-2. Launch `repak-gui`.
-3. Confirm the detected Marvel Rivals mod folder.
-4. Drag in mods, archives, or mod folders, or use `File -> Install mods` / `File -> Pack folder`.
-5. Install the generated output into the `~mods` directory.
-
-## Features
-
-- GUI-first workflow for Marvel Rivals mod installation
-- drag-and-drop support for `.pak`, `.zip`, `.rar`, and mod folders
-- automatic detection of the Marvel Rivals mod directory
-- IOStore generation for modern mods
-- pak repacking for audio and movie patches
-- mesh-fix support for custom model mods
-- batch install flow with per-mod options
-- installed mod browser with enable, disable, and delete actions
-- pak content viewer with extract, copy path, copy offset, and hash actions
-- mod type detection for character, UI, audio, and movie mods
-- Windows and Linux release builds
-
-## Nexus Release Automation
-
-The repository includes `.github/workflows/nexus.yml` to publish GitHub release assets to Nexus Mods via the v3 API.
-
-It downloads `.zip` and `.tar.xz` assets from the published GitHub release, converts any `.tar.xz` assets into `.zip`, then uploads each file as a new version in an existing Nexus file update group.
-
-Required GitHub configuration:
-
-- Secret `NEXUSMODS_API_KEY`: your Nexus Mods API key.
-- Variable `NEXUS_FILE_GROUP_MAP_JSON`: JSON object mapping the final Nexus upload filename to a Nexus file update group ID.
-- Variable `NEXUS_FILE_NAME_MAP_JSON`: optional JSON object mapping the final Nexus upload filename to the display name shown on Nexus.
-- Variable `NEXUS_FILE_CATEGORY`: optional Nexus file category, one of `main`, `optional`, or `miscellaneous`. Defaults to `main`.
-
-Example `NEXUS_FILE_GROUP_MAP_JSON`:
-
-```json
-{
-  "repak-gui-x86_64-pc-windows-msvc.zip": "12345",
-  "repak-gui-x86_64-unknown-linux-gnu.zip": "67890"
-}
+```text
+MarvelRivals\MarvelGame\Marvel\Content\Paks\~mods
 ```
 
-## Latest Changelog
+## Quick Start
 
-### v2.8.2 - 2026-03-11
+1. Download latest release from Nexus Mods: <https://www.nexusmods.com/marvelrivals/mods/1717>.
+2. Open `repak-gui`.
+3. Confirm or browse to `Content\Paks\~mods`.
+4. Drag in `.zip`, `.rar`, `.pak`, IoStore triples, or folders.
+5. Review install rows/options.
+6. Click `Install mod`.
+7. Launch game from GUI or Steam.
 
-- made internet-dependent behavior optional
-- improved `flake.nix` support
+## Wiki
 
-### v2.8.1 - 2026-02-06
+| Page | Contents |
+| --- | --- |
+| [GUI](docs/gui.md) | install flow, mod list, tags, file table, KawaiiPhysics mapping |
+| [retoc-rivals-cli](docs/retoc-rivals-cli.md) | commands, accepted inputs, examples, filters, compression, full IoStore checks |
+| [Build](docs/build.md) | Rust builds, run commands, workspace packages |
+| [Troubleshooting](docs/troubleshooting.md) | game path, locked files, KawaiiPhysics, IoStore dependency failures |
+| [Release Automation](docs/release-automation.md) | Nexus Mods workflow inputs and config |
+| [Changelog](CHANGELOG.md) | release history |
 
-- fixed the GUI update check
+## Workspace
 
-### v2.8.0 - 2026-02-06
+| Path | Purpose |
+| --- | --- |
+| `repak-gui/` | primary GUI app |
+| `retoc-rivals-cli/` | current scriptable Rivals CLI |
+| `retoc-rivals/` | IoStore conversion/extraction library |
+| `repak/` | pak reader/writer library |
+| `repak_cli/` | older pak-only CLI |
+| `uasset-mesh-patch-rivals/` | mesh patch helper |
+| `usmap/` | mapping-related workspace content |
 
-- made update checks mandatory
-- refreshed skin data
-- moved mesh directory fetching into the background
-
-### v2.7.0 - 2026-02-05
-
-- added release-mode fetching for latest skin data
-
-<details>
-<summary>CLI Help</summary>
+## Common Commands
 
 ```console
-$ repak --help
-Usage: repak [OPTIONS] <COMMAND>
-
-Commands:
-  info       Print .pak info
-  list       List .pak files
-  hash-list  List .pak files and the SHA256 of their contents. Useful for finding differences between paks
-  unpack     Unpack .pak file
-  pack       Pack directory into .pak file
-  get        Reads a single file to stdout
-  help       Print this message or the help of the given subcommand(s)
-
-Options:
-  -a, --aes-key <AES_KEY>  256 bit AES encryption key as base64 or hex string if the pak is encrypted [default: 0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74]
-  -h, --help               Print help
-  -V, --version            Print version
+cargo run -p repak-gui
+cargo run -p retoc-rivals-cli -- --help
+cargo build -p repak-gui --release
+cargo build -p retoc-rivals-cli --release
+cargo check
 ```
 
-</details>
+## CLI Shortcuts
+
+```console
+retoc-rivals-cli info ExampleMod_9999999_P.utoc
+retoc-rivals-cli manifest ExampleMod_9999999_P.utoc --filters
+retoc-rivals-cli unpack ExampleMod_9999999_P.utoc --output unpacked
+retoc-rivals-cli unpack-dir "C:\Downloads\Rivals Mods"
+retoc-rivals-cli pack unpacked --output "C:\Path\To\~mods" --compression oodle
+retoc-rivals-cli pack unpacked --kawaii-physics-only
+retoc-rivals-cli fix-kawaii-physics --output fixed-mods
+```
+
+See [docs/retoc-rivals-cli.md](docs/retoc-rivals-cli.md) for full command behavior.

@@ -4011,9 +4011,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.13.1"
+version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04e9018c9d814e5f30cc16a0f03271aeab3571e609612d9fe78c1aa8d11c2f62"
+checksum = "62e0021ea2c22aed41653bc7e1419abb2c97e038ff2c33d0e1309e49a97deec0"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -4099,6 +4099,26 @@ dependencies = [
  "typed-path",
  "ue_reflection",
  "zstd",
+]
+
+[[package]]
+name = "retoc-rivals-cli"
+version = "3.2.2"
+dependencies = [
+ "clap",
+ "dirs",
+ "path-clean",
+ "repak",
+ "reqwest",
+ "retoc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
+ "unrar",
+ "walkdir",
+ "zip",
 ]
 
 [[package]]
