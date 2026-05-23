@@ -4,6 +4,11 @@
 - Replace per-asset KawaiiPhysics helper process spawning with a hosted managed DLL binding.
 - Fix IoStore `To repak` progress accounting so extraction and rebuild/Kawaii work are both represented.
 - Speed up KawaiiPhysics installs by caching the parsed USMAP in the managed binding and skipping non-Kawaii assets before entering the binding.
+- Add `retoc-rivals-cli` for inspecting, manifesting, unpacking, packing, and fixing Marvel Rivals IoStore/legacy pak mods from the command line.
+- Add CLI and GUI documentation covering build setup, GUI usage, release automation, troubleshooting, and `retoc-rivals-cli` workflows.
+- Share Marvel Rivals path detection and latest-depot USMAP resolution between the GUI and CLI.
+- Add `.7z` archive support for GUI drag-and-drop installs and `retoc-rivals-cli` archive inputs.
+- Remove legacy `repak-cli`
 
 # Version 3.1.0 (2026-05-18)
 

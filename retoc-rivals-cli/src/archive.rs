@@ -17,6 +17,8 @@ pub fn extract_archive(path: &Path) -> Result<TempDir, String> {
             .map_err(|e| format!("Failed to extract {}: {e}", path.display()))?,
         Some("rar") => extract_rar(path, temp.path())
             .map_err(|e| format!("Failed to extract {}: {e}", path.display()))?,
+        Some("7z") => sevenz_rust2::decompress_file(path, temp.path())
+            .map_err(|e| format!("Failed to extract {}: {e}", path.display()))?,
         _ => return Err(format!("Unsupported archive: {}", path.display())),
     }
     Ok(temp)

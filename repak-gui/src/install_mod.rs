@@ -22,7 +22,7 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicBool, AtomicI32};
 use std::sync::{Arc, LazyLock};
 use std::thread;
-use tempfile::tempdir;
+use tempfile::{tempdir, TempDir};
 use tracing::{debug, error, info, instrument, warn};
 use walkdir::WalkDir;
 
@@ -51,6 +51,9 @@ pub struct InstallableMod {
     pub is_archived: bool,
     pub enabled: bool,
     pub obfuscated: bool,
+    // Keeps extracted archive files alive while the install dialog/worker still references them.
+    #[allow(dead_code)]
+    pub extracted_archive_dir: Option<Arc<TempDir>>,
     // pub audio_mod: bool,
 }
 
@@ -74,6 +77,7 @@ impl Default for InstallableMod {
             iostore: false,
             is_archived: false,
             enabled: true,
+            extracted_archive_dir: None,
         }
     }
 }
@@ -493,7 +497,31 @@ pub static AES_KEY: LazyLock<AesKey> = LazyLock::new(|| {
 });
 
 #[instrument(fields(path))]
-fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
+fn archive_payload_root(root: &std::path::Path) -> PathBuf {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return root.to_path_buf();
+    };
+    let mut dirs = Vec::new();
+    let mut files = 0usize;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            dirs.push(path);
+        } else {
+            files += 1;
+        }
+    }
+    if files == 0 && dirs.len() == 1 {
+        dirs.pop().unwrap()
+    } else {
+        root.to_path_buf()
+    }
+}
+
+fn find_mods_from_archive(
+    path: &std::path::Path,
+    archive_dir: Arc<TempDir>,
+) -> Vec<InstallableMod> {
     let mut new_mods = Vec::<InstallableMod>::new();
     debug!("Scanning extracted archive directory");
     for entry in WalkDir::new(path) {
@@ -548,6 +576,7 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                     is_archived: false,
                     editing: false,
                     compression: Oodle,
+                    extracted_archive_dir: Some(archive_dir.clone()),
                     ..Default::default()
                 };
 
@@ -560,6 +589,46 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
     new_mods
 }
 
+fn extracted_archive_raw_directory_mod(
+    archive_path: &std::path::Path,
+    root: PathBuf,
+    archive_dir: Arc<TempDir>,
+) -> Result<Option<InstallableMod>, repak::Error> {
+    let mut files = vec![];
+    collect_files(&mut files, &root)?;
+    if !files.iter().any(|path| {
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("uasset"))
+    }) {
+        return Ok(None);
+    }
+
+    let file_names = files
+        .iter()
+        .map(|s| s.to_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    let len = processable_asset_count(file_names.iter().map(String::as_str));
+    let modtype = get_current_pak_characteristics(file_names);
+
+    Ok(Some(InstallableMod {
+        mod_name: archive_path
+            .file_stem()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string(),
+        mod_type: modtype,
+        is_dir: true,
+        mod_path: root,
+        mount_point: "../../../".to_string(),
+        path_hash_seed: "00000000".to_string(),
+        total_files: len,
+        extracted_archive_dir: Some(archive_dir),
+        ..Default::default()
+    }))
+}
+
 #[instrument(skip(paths), fields(path_count = paths.len()))]
 pub fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
     let mut extensible_vec: Vec<InstallableMod> = Vec::new();
@@ -568,8 +637,12 @@ pub fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
         .iter()
         .map(|path| {
             let is_dir = path.clone().is_dir();
-            let extension = path.extension().unwrap_or_default();
-            let is_archive = extension == "zip" || extension == "rar";
+            let extension = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.to_ascii_lowercase())
+                .unwrap_or_default();
+            let is_archive = matches!(extension.as_str(), "7z" | "zip" | "rar");
 
             let mut modtype = "Unknown".to_string();
             let mut pak = None;
@@ -632,22 +705,25 @@ pub fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
             if is_archive {
                 info!(?path, "Extracting archive for inspection");
                 modtype = "Season 2 Archives".to_string();
-                let tempdir = tempdir()
-                    .unwrap()
-                    .path()
-                    .as_os_str()
-                    .to_str()
-                    .unwrap()
-                    .to_string();
+                let archive_dir = Arc::new(tempdir().unwrap());
 
                 if extension == "zip" {
-                    extract_zip(path.to_str().unwrap(), &tempdir).expect("Unable to install mod")
+                    extract_zip(path, archive_dir.path()).expect("Unable to install mod")
                 } else if extension == "rar" {
-                    extract_rar(path.to_str().unwrap(), &tempdir).expect("Unable to install mod")
+                    extract_rar(path, archive_dir.path()).expect("Unable to install mod")
+                } else if extension == "7z" {
+                    extract_7z(path, archive_dir.path()).expect("Unable to install mod")
+                }
+
+                let root = archive_payload_root(archive_dir.path());
+                if let Some(mods) =
+                    extracted_archive_raw_directory_mod(path, root.clone(), archive_dir.clone())?
+                {
+                    extensible_vec.push(mods);
                 }
 
                 // Now find pak files / s2 archives and turn them into installable mods
-                let mut new_mods = find_mods_from_archive(&tempdir);
+                let mut new_mods = find_mods_from_archive(&root, archive_dir);
                 extensible_vec.append(&mut new_mods);
             }
 

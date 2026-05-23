@@ -1088,6 +1088,7 @@ impl RepakModManager {
                     editing: false,
                     enabled: true,
                     obfuscated: false,
+                    extracted_archive_dir: None,
                 };
 
                 #[cfg(all(windows, not(debug_assertions)))]
@@ -1419,7 +1420,12 @@ impl RepakModManager {
                     path.is_dir()
                         || path
                             .extension()
-                            .map(|ext| ext == "pak" || ext == "zip" || ext == "rar")
+                            .map(|ext| {
+                                matches!(
+                                    ext.to_str().map(|ext| ext.to_ascii_lowercase()).as_deref(),
+                                    Some("pak" | "7z" | "zip" | "rar")
+                                )
+                            })
                             .unwrap_or(false)
                 });
 
@@ -1448,7 +1454,7 @@ impl RepakModManager {
                         trace!("Install dialog payload: {:#?}", dialog.mods);
                     }
                 } else {
-                    warn!("Dropped items contained unsupported files; only directories, .pak, .zip, and .rar are accepted");
+                    warn!("Dropped items contained unsupported files; only directories, .pak, .7z, .zip, and .rar are accepted");
                 }
             }
         });

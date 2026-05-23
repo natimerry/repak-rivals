@@ -46,7 +46,7 @@ pub fn classify_path(path: &Path) -> Result<PackageSource, String> {
     }
 
     let ext = lower_ext(path);
-    if ext.as_deref() == Some("rar") || ext.as_deref() == Some("zip") {
+    if matches!(ext.as_deref(), Some("7z" | "rar" | "zip")) {
         return Ok(PackageSource::Archive(path.to_path_buf()));
     }
 
