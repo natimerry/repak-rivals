@@ -86,6 +86,20 @@ fn processable_asset_count<'a>(paths: impl IntoIterator<Item = &'a str>) -> usiz
         .max(1)
 }
 
+fn processable_iostore_asset_count<'a>(paths: impl IntoIterator<Item = &'a str>) -> usize {
+    paths.into_iter().count().max(1)
+}
+
+pub(crate) fn install_progress_units(mods: &InstallableMod) -> usize {
+    let asset_units = mods.total_files.max(1);
+
+    if mods.iostore && mods.repak {
+        asset_units.saturating_mul(2)
+    } else {
+        asset_units
+    }
+}
+
 #[derive(Debug)]
 pub struct ModInstallRequest {
     pub(crate) mods: Vec<InstallableMod>,
@@ -110,7 +124,7 @@ impl ModInstallRequest {
         let len = mods
             .iter()
             .filter(|m| m.enabled)
-            .map(|m| m.total_files)
+            .map(install_progress_units)
             .sum::<usize>()
             .max(1);
         info!("Created install request");
@@ -240,7 +254,7 @@ impl ModInstallRequest {
                                     self.total_mods =
                                         mods.iter()
                                             .filter(|m| m.enabled)
-                                            .map(|m| m.total_files)
+                                            .map(install_progress_units)
                                             .sum::<usize>()
                                             .max(1) as f32;
                                     self.installed_mods_cbk.store(0, SeqCst);
@@ -508,7 +522,7 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                         .iter()
                         .map(|x| x.file_path.clone())
                         .collect::<Vec<_>>();
-                    len = processable_asset_count(files.iter().map(String::as_str));
+                    len = processable_iostore_asset_count(files.iter().map(String::as_str));
                     modtype = get_current_pak_characteristics(files);
                     iostore = true;
                 }
@@ -587,7 +601,7 @@ pub fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
                                 .iter()
                                 .map(|x| x.file_path.clone())
                                 .collect::<Vec<_>>();
-                            len = processable_asset_count(files.iter().map(String::as_str));
+                            len = processable_iostore_asset_count(files.iter().map(String::as_str));
                             modtype = get_current_pak_characteristics(files);
                             iostore = true;
                         } else {

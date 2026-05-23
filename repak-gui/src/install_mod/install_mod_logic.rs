@@ -4,7 +4,7 @@ pub mod pak_files;
 pub mod patch_meshes;
 
 use crate::install_mod::InstallableMod;
-use iotoc::{convert_directory_to_iostore, to_legacy_uasset_fast};
+use iotoc::{convert_directory_to_iostore, to_legacy_uasset_fast_with_progress};
 use pak_files::create_repak_from_pak;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
@@ -90,11 +90,13 @@ fn repack_iostore_via_fast_extract(
     let extract_temp = tempfile::tempdir().map_err(repak::Error::Io)?;
     #[cfg(all(windows, not(debug_assertions)))]
     show_to_legacy_console();
-    let extract_result = to_legacy_uasset_fast(
+    let extract_result = to_legacy_uasset_fast_with_progress(
         installable_mod.mod_path.clone(),
         extract_temp.path().to_path_buf(),
         source_mods_dir.to_path_buf(),
         chunkdir,
+        installed_mods_ptr.clone(),
+        installable_mod.total_files,
     );
     #[cfg(all(windows, not(debug_assertions)))]
     close_to_legacy_console();

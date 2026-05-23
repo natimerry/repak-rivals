@@ -41,6 +41,10 @@
 4. Adjust output name and options.
 5. Click `Install mod`.
 
+For IoStore inputs installed with `To repak`, progress is split across legacy
+extraction and IoStore rebuild. KawaiiPhysics work runs during the rebuild phase,
+so the bar should no longer reach 100% immediately after extraction.
+
 ## Install Options
 
 | Option | Meaning |

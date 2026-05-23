@@ -1,7 +1,9 @@
-# Unreleased
+# v3.2.3
 
 ## Changes:
-- No changes yet.
+- Replace per-asset KawaiiPhysics helper process spawning with a hosted managed DLL binding.
+- Fix IoStore `To repak` progress accounting so extraction and rebuild/Kawaii work are both represented.
+- Speed up KawaiiPhysics installs by caching the parsed USMAP in the managed binding and skipping non-Kawaii assets before entering the binding.
 
 # Version 3.1.0 (2026-05-18)
 

@@ -9,7 +9,7 @@ Build from workspace root.
 | Rust | install via <https://rustup.rs/> |
 | toolchain | pinned by `rust-toolchain.toml` |
 | Oodle DLL/SO | repo includes expected Oodle runtime files |
-| KawaiiPhysics helper | built by `retoc-rivals` build script |
+| KawaiiPhysics binding | managed .NET 8 DLL built by `retoc-rivals` build script |
 
 ## Packages
 
@@ -55,6 +55,21 @@ Release binaries land under:
 ```text
 target\release\
 ```
+
+## KawaiiPhysics Binding
+
+`retoc-rivals/build.rs` publishes `UAssetAPI/KawaiiPhysicsBinding` as a managed
+`KawaiiPhysicsBinding.dll` with `PublishAot=false`. NativeAOT is intentionally
+disabled because UAssetAPI relies on reflection.
+
+The Rust side embeds the published DLL artifacts, extracts them beside the
+running binary under `KawaiiPhysicsBinding/`, loads .NET through `hostfxr`, and
+calls the managed `PortAsset` export directly. This avoids spawning a helper
+process for every asset.
+
+By default the binding is framework-dependent and requires a local .NET 8
+runtime. Set `RETOC_KAWAII_BINDING_SELF_CONTAINED=true` when building if the
+binding artifacts should include the .NET runtime files.
 
 ## Workspace Notes
 

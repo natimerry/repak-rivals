@@ -22,7 +22,7 @@ const MOD_NAME_SUFFIX: &str = "_9999999_P";
 struct TracingRetocLogProvider {
     installed_assets: Arc<AtomicI32>,
     base_progress: i32,
-    mod_assets: i32,
+    phase_units: i32,
     max_position: AtomicI32,
 }
 
@@ -35,8 +35,8 @@ impl retoc::LogProvider for TracingRetocLogProvider {
         }
     }
 
-    fn progress(&self, position: u64, _length: u64) {
-        let position = position.min(self.mod_assets.max(0) as u64) as i32;
+    fn progress(&self, position: u64, length: u64) {
+        let position = scale_phase_progress(position, length, self.phase_units);
         let previous_max = self.max_position.fetch_max(position, Ordering::SeqCst);
         let position = previous_max.max(position);
         let progress = self.base_progress.saturating_add(position);
@@ -54,6 +54,34 @@ impl retoc::LogProvider for TracingOnlyRetocLogProvider {
             info!(target: "retoc", "{}", msg);
         }
     }
+}
+
+fn progress_units(total_files: usize) -> i32 {
+    total_files.max(1).min(i32::MAX as usize) as i32
+}
+
+fn scale_phase_progress(position: u64, length: u64, phase_units: i32) -> i32 {
+    let phase_units = phase_units.max(0) as u64;
+    if phase_units == 0 {
+        return 0;
+    }
+
+    let length = length.max(1);
+    let position = position.min(length);
+    let scaled = if position == 0 {
+        0
+    } else {
+        position
+            .saturating_mul(phase_units)
+            .saturating_add(length - 1)
+            / length
+    };
+
+    scaled.min(i32::MAX as u64) as i32
+}
+
+fn finish_progress_phase(progress: &AtomicI32, base_progress: i32, phase_units: i32) {
+    progress.fetch_max(base_progress.saturating_add(phase_units), Ordering::SeqCst);
 }
 
 fn ensure_mod_name_suffix(name: &str) -> String {
@@ -295,10 +323,11 @@ pub fn convert_directory_to_iostore(
     let config = Arc::new(config);
 
     let base_progress = packed_files_count.load(Ordering::SeqCst);
+    let phase_units = progress_units(pak.total_files);
     retoc::set_log_provider(Arc::new(TracingRetocLogProvider {
         installed_assets: packed_files_count.clone(),
         base_progress,
-        mod_assets: pak.total_files.max(1).min(i32::MAX as usize) as i32,
+        phase_units,
         max_position: AtomicI32::new(0),
     }));
     action_to_zen(action, config).map_err(|e| {
@@ -360,12 +389,7 @@ pub fn convert_directory_to_iostore(
     pak_writer.write_index()?;
 
     log::info!("Wrote pak file successfully");
-    let minimum_progress =
-        base_progress.saturating_add(pak.total_files.max(1).min(i32::MAX as usize) as i32);
-    let current_progress = packed_files_count.load(Ordering::SeqCst);
-    if current_progress < minimum_progress {
-        packed_files_count.store(minimum_progress, Ordering::SeqCst);
-    }
+    finish_progress_phase(&packed_files_count, base_progress, phase_units);
     Ok(())
 
     // now generate the fake pak file
@@ -489,7 +513,53 @@ pub fn to_legacy_uasset_fast(
     mods_dir: PathBuf,
     game_paks_dir: PathBuf,
 ) -> Result<(), repak::Error> {
-    retoc::set_log_provider(Arc::new(TracingOnlyRetocLogProvider));
+    to_legacy_uasset_fast_inner(
+        pak,
+        output_dir,
+        mods_dir,
+        game_paks_dir,
+        Arc::new(TracingOnlyRetocLogProvider),
+    )
+}
+
+pub fn to_legacy_uasset_fast_with_progress(
+    pak: PathBuf,
+    output_dir: PathBuf,
+    mods_dir: PathBuf,
+    game_paks_dir: PathBuf,
+    packed_files_count: Arc<AtomicI32>,
+    phase_units: usize,
+) -> Result<(), repak::Error> {
+    let base_progress = packed_files_count.load(Ordering::SeqCst);
+    let phase_units = progress_units(phase_units);
+    let result = to_legacy_uasset_fast_inner(
+        pak,
+        output_dir,
+        mods_dir,
+        game_paks_dir,
+        Arc::new(TracingRetocLogProvider {
+            installed_assets: packed_files_count.clone(),
+            base_progress,
+            phase_units,
+            max_position: AtomicI32::new(0),
+        }),
+    );
+
+    if result.is_ok() {
+        finish_progress_phase(&packed_files_count, base_progress, phase_units);
+    }
+
+    result
+}
+
+fn to_legacy_uasset_fast_inner(
+    pak: PathBuf,
+    output_dir: PathBuf,
+    mods_dir: PathBuf,
+    game_paks_dir: PathBuf,
+    log_provider: Arc<dyn retoc::LogProvider>,
+) -> Result<(), repak::Error> {
+    retoc::set_log_provider(log_provider);
     info!(
         pak = %pak.display(),
         output_dir = %output_dir.display(),
