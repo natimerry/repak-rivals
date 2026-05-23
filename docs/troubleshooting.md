@@ -17,8 +17,11 @@ Close Marvel Rivals before installing, deleting, enabling, or disabling mods. Wi
 | Symptom | Fix |
 | --- | --- |
 | GUI blocks install | set `.usmap` with `File -> Select Mapping file` or disable `Kawaii porter` |
-| CLI lacks mapping | pass `--kawaii-physics-usmap mappings.usmap`; if omitted, CLI tries auto-download |
-| only want asset fix | use `retoc-rivals-cli pack <dir> --kawaii-physics-only` |
+| CLI lacks mapping | pass `--kawaii-physics-usmap mappings.usmap`; if omitted, CLI uses saved GUI config, then downloads the latest mapping |
+| only want asset fix | use `retoc-rivals-cli fix-kawaii-physics <dir>` |
+| fixing every mod in a mixed download folder | use `retoc-rivals-cli pack-dir "C:\Downloads\Rivals Mods" --output fixed_mods --kawaii-physics` |
+
+Use `--kawaii-physics` when you want fixed installable package files. Use `fix-kawaii-physics <dir>` on an unpacked/raw directory when you want to patch the assets in place and pack them later yourself.
 
 ## IoStore Dependencies
 
@@ -27,6 +30,8 @@ When extraction misses imported packages or fails resolving chunks, pass game `P
 ```console
 retoc-rivals-cli unpack Example.utoc --game-paks-dir "C:\Path\To\MarvelRivals\MarvelGame\Marvel\Content\Paks"
 ```
+
+For CLI commands that need game containers, omit `--game-paks-dir` only when repak-gui has saved the game `Content\Paks` path. If neither an explicit path nor saved GUI config exists, the CLI stops with an error instead of guessing. Use the base `Content\Paks` directory, not `Content\Paks\~mods`.
 
 If fast-path dependency scan is insufficient:
 
@@ -46,7 +51,9 @@ Fast path opens selected mod containers plus likely dependencies. Full check ope
 
 ## Archive Payloads
 
-Archives are extracted to temp and scanned. If archive contains multiple mods, GUI may create multiple install rows and CLI may perform multiple package operations.
+`.7z`, `.zip`, and `.rar` archives are extracted to temp and scanned. If an archive contains multiple mods, GUI may create multiple install rows and CLI may perform multiple package operations.
+
+For a mixed folder containing loose IoStore triples, legacy paks, raw mod folders, and archives, use `retoc-rivals-cli pack-dir`. It scans the folder first, logs each archive extraction, and batches IoStore KawaiiPhysics extraction so game containers are opened once for the input set instead of once per archive.
 
 ## Legacy Pak vs IoStore
 

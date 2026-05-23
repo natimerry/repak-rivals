@@ -6,7 +6,7 @@
 
 | Area | Details |
 | --- | --- |
-| Inputs | `.pak`, IoStore triples (`.pak/.utoc/.ucas`), `.zip`, `.rar`, raw asset folders |
+| Inputs | `.pak`, IoStore triples (`.pak/.utoc/.ucas`), `.7z`, `.zip`, `.rar`, raw asset folders |
 | Conversion | legacy pak -> current output; raw folder -> IoStore; optional obfuscation |
 | KawaiiPhysics | ports assets during conversion when `.usmap` configured |
 | Management | enable/disable/delete installed mods; list `~mods`; live refresh |
@@ -30,7 +30,7 @@
 | `.pak` only | legacy pak; can install/copy or repack depending options |
 | `.pak` + `.utoc` + `.ucas` | IoStore mod set; copies or repacks depending options |
 | `.utoc` / `.ucas` | resolved by same-stem companion files next to it |
-| `.zip` / `.rar` | extracted then scanned for supported mod payloads |
+| `.7z` / `.zip` / `.rar` | extracted then scanned for supported mod payloads |
 | raw folder | converted to IoStore unless mod type routes to pak-only path |
 
 ## Install Flow

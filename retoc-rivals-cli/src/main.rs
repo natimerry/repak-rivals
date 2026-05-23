@@ -40,6 +40,7 @@ fn run(args: Args) -> Result<(), String> {
         Command::Unpack(command) => unpack::unpack(args.aes_key, command),
         Command::UnpackDir(command) => unpack::unpack_dir(args.aes_key, command),
         Command::Pack(command) => pack::pack(args.aes_key, command),
+        Command::PackDir(command) => pack::pack_dir(args.aes_key, command),
         Command::FixKawaiiPhysics(command) => legacy::fix_kawaii_physics(args.aes_key, command),
     }
 }

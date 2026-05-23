@@ -7,6 +7,20 @@ use zip::ZipArchive;
 
 pub fn extract_archive(path: &Path) -> Result<TempDir, String> {
     let temp = tempfile::tempdir().map_err(|e| format!("Failed to create temp dir: {e}"))?;
+    let size = std::fs::metadata(path).map(|metadata| metadata.len()).ok();
+    match size {
+        Some(size) => tracing::info!(
+            archive = %path.display(),
+            size,
+            output = %temp.path().display(),
+            "Extracting archive"
+        ),
+        None => tracing::info!(
+            archive = %path.display(),
+            output = %temp.path().display(),
+            "Extracting archive"
+        ),
+    }
     match path
         .extension()
         .and_then(|ext| ext.to_str())
@@ -21,6 +35,11 @@ pub fn extract_archive(path: &Path) -> Result<TempDir, String> {
             .map_err(|e| format!("Failed to extract {}: {e}", path.display()))?,
         _ => return Err(format!("Unsupported archive: {}", path.display())),
     }
+    tracing::debug!(
+        archive = %path.display(),
+        output = %temp.path().display(),
+        "Finished extracting archive"
+    );
     Ok(temp)
 }
 

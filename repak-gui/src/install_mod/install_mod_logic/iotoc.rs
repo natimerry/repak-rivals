@@ -657,6 +657,7 @@ pub fn to_legacy_uasset_fast_batch(
             "Prepared batch to-legacy filter"
         );
         items.push(retoc::ActionToLegacyBatchItem {
+            inputs: vec![pak.with_extension("utoc")],
             output: output.clone(),
             filter,
         });

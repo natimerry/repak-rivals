@@ -30,9 +30,11 @@ pub enum Command {
     /// Recursively extract every IoStore or legacy pak found below a directory.
     #[command(alias = "extract-dir")]
     UnpackDir(UnpackDirArgs),
-    /// Package raw directories, legacy paks, archives, or install IoStore triples.
+    /// Package one explicit raw directory, legacy pak, archive, IoStore package, or package directory.
     Pack(PackArgs),
-    /// Rebuild installed IoStore mods with KawaiiPhysics porting using saved GUI config.
+    /// Package every mod found below a mixed directory.
+    PackDir(PackDirArgs),
+    /// Patch raw assets in-place or rebuild installed IoStore mods with KawaiiPhysics porting.
     FixKawaiiPhysics(FixKawaiiPhysicsArgs),
 }
 
@@ -124,15 +126,57 @@ pub struct PackArgs {
     #[arg(long)]
     pub kawaii_physics: bool,
 
-    /// Port KawaiiPhysics assets in-place and do not convert the directory to IoStore.
-    #[arg(long)]
-    pub kawaii_physics_only: bool,
-
-    /// USMAP used by KawaiiPhysics porting. If omitted, the latest mapping is downloaded.
+    /// USMAP used by KawaiiPhysics porting. If omitted, saved config is used, then the latest mapping is downloaded.
     #[arg(long)]
     pub kawaii_physics_usmap: Option<PathBuf>,
 
     /// Game Paks directory used when repacking IoStore with dependencies.
+    #[arg(long)]
+    pub game_paks_dir: Option<PathBuf>,
+
+    /// Open all game IoStore containers instead of only selected fast-path containers.
+    #[arg(long)]
+    pub full_iostore_check: bool,
+}
+
+#[derive(Parser, Debug)]
+pub struct PackDirArgs {
+    /// Directory containing raw mod folders, legacy paks, archives, or IoStore package triples.
+    pub input: PathBuf,
+
+    /// Output directory. Defaults to the input directory's parent.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+
+    /// Mount point to write into generated fake .pak files.
+    #[arg(long, default_value = "../../../")]
+    pub mount_point: String,
+
+    /// Path hash seed to write into generated fake .pak files.
+    #[arg(long, default_value = "00000000")]
+    pub path_hash_seed: String,
+
+    /// Do not append the Marvel Rivals mod suffix to output names.
+    #[arg(long)]
+    pub no_mod_suffix: bool,
+
+    /// Obfuscate generated IoStore containers.
+    #[arg(long)]
+    pub obfuscate: bool,
+
+    /// IoStore compression method.
+    #[arg(long, value_enum, default_value_t = CompressionArg::Oodle)]
+    pub compression: CompressionArg,
+
+    /// Port KawaiiPhysics assets while converting to IoStore.
+    #[arg(long)]
+    pub kawaii_physics: bool,
+
+    /// USMAP used by KawaiiPhysics porting. If omitted, saved config is used, then the latest mapping is downloaded.
+    #[arg(long)]
+    pub kawaii_physics_usmap: Option<PathBuf>,
+
+    /// Game Paks directory used when repacking IoStore with dependencies. If omitted, saved GUI config is used.
     #[arg(long)]
     pub game_paks_dir: Option<PathBuf>,
 
@@ -172,6 +216,9 @@ pub struct ManifestArgs {
 
 #[derive(Parser, Debug)]
 pub struct FixKawaiiPhysicsArgs {
+    /// Optional unpacked/raw asset directory to patch in-place. If omitted, installed IoStore mods are rebuilt using saved GUI config.
+    pub input: Option<PathBuf>,
+
     /// Directory for rebuilt mods.
     #[arg(short, long, default_value = "fixed-mods")]
     pub output: PathBuf,

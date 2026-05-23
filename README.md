@@ -21,7 +21,7 @@ MarvelRivals\MarvelGame\Marvel\Content\Paks\~mods
 1. Download latest release from Nexus Mods: <https://www.nexusmods.com/marvelrivals/mods/1717>.
 2. Open `repak-gui`.
 3. Confirm or browse to `Content\Paks\~mods`.
-4. Drag in `.zip`, `.rar`, `.pak`, IoStore triples, or folders.
+4. Drag in `.7z`, `.zip`, `.rar`, `.pak`, IoStore triples, or folders.
 5. Review install rows/options.
 6. Click `Install mod`.
 7. Launch game from GUI or Steam.
@@ -67,7 +67,9 @@ retoc-rivals-cli manifest ExampleMod_9999999_P.utoc --filters
 retoc-rivals-cli unpack ExampleMod_9999999_P.utoc --output unpacked
 retoc-rivals-cli unpack-dir "C:\Downloads\Rivals Mods"
 retoc-rivals-cli pack unpacked --output "C:\Path\To\~mods" --compression oodle
-retoc-rivals-cli pack unpacked --kawaii-physics-only
+retoc-rivals-cli pack-dir "C:\Downloads\Rivals Mods" --output "C:\Path\To\~mods"
+retoc-rivals-cli pack-dir "C:\Downloads\Rivals Mods" --output fixed_mods --kawaii-physics
+retoc-rivals-cli fix-kawaii-physics unpacked
 retoc-rivals-cli fix-kawaii-physics --output fixed-mods
 ```
 

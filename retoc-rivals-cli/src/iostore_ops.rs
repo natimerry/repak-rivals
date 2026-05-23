@@ -135,6 +135,7 @@ pub fn to_legacy_outputs(
         fs::create_dir_all(&output)
             .map_err(|e| format!("Failed to create {}: {e}", output.display()))?;
         items.push(ActionToLegacyBatchItem {
+            inputs: vec![package.utoc.clone()],
             output: output.clone(),
             filter: item_filter,
         });

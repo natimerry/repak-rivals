@@ -32,6 +32,7 @@ fn print_source_info(aes_key: &retoc::AesKey, source: PackageSource) -> Result<(
             root,
             iostore,
             legacy_paks,
+            archives,
         } => {
             println!("type: package-directory");
             println!("path: {}", root.display());
@@ -42,6 +43,10 @@ fn print_source_info(aes_key: &retoc::AesKey, source: PackageSource) -> Result<(
             println!("legacy pak files: {}", legacy_paks.len());
             for pak in &legacy_paks {
                 println!("  {}", pak.display());
+            }
+            println!("archives: {}", archives.len());
+            for archive in &archives {
+                println!("  {}", archive.display());
             }
             Ok(())
         }

@@ -29,17 +29,21 @@ pub enum PackageSource {
         root: PathBuf,
         iostore: Vec<IoStorePackage>,
         legacy_paks: Vec<PathBuf>,
+        archives: Vec<PathBuf>,
     },
 }
 
 pub fn classify_path(path: &Path) -> Result<PackageSource, String> {
     if path.is_dir() {
-        let (iostore, legacy_paks) = scan_directory_packages(path);
-        if !has_uasset(path) && (!iostore.is_empty() || !legacy_paks.is_empty()) {
+        let (iostore, legacy_paks, archives) = scan_directory_packages(path);
+        if !has_uasset(path)
+            && (!iostore.is_empty() || !legacy_paks.is_empty() || !archives.is_empty())
+        {
             return Ok(PackageSource::DirectoryPackages {
                 root: path.to_path_buf(),
                 iostore,
                 legacy_paks,
+                archives,
             });
         }
         return Ok(PackageSource::RawDirectory(path.to_path_buf()));
@@ -76,16 +80,22 @@ pub fn classify_package_file(path: &Path) -> Result<PackageSource, String> {
     ))
 }
 
-pub fn scan_directory_packages(dir: &Path) -> (Vec<IoStorePackage>, Vec<PathBuf>) {
+pub fn scan_directory_packages(dir: &Path) -> (Vec<IoStorePackage>, Vec<PathBuf>, Vec<PathBuf>) {
     let mut seen_iostore = HashSet::new();
     let mut iostore = Vec::new();
     let mut legacy_paks = Vec::new();
+    let mut archives = Vec::new();
 
     for entry in WalkDir::new(dir).into_iter().filter_map(Result::ok) {
         if !entry.file_type().is_file() {
             continue;
         }
         let path = entry.path();
+        if matches!(lower_ext(path).as_deref(), Some("7z" | "rar" | "zip")) {
+            archives.push(path.to_path_buf());
+            continue;
+        }
+
         if !matches!(lower_ext(path).as_deref(), Some("pak" | "utoc" | "ucas")) {
             continue;
         }
@@ -108,7 +118,9 @@ pub fn scan_directory_packages(dir: &Path) -> (Vec<IoStorePackage>, Vec<PathBuf>
     iostore.sort_by(|a, b| a.utoc.cmp(&b.utoc));
     legacy_paks.sort();
     legacy_paks.dedup();
-    (iostore, legacy_paks)
+    archives.sort();
+    archives.dedup();
+    (iostore, legacy_paks, archives)
 }
 
 fn has_uasset(dir: &Path) -> bool {

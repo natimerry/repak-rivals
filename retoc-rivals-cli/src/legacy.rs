@@ -15,6 +15,10 @@ pub fn fix_kawaii_physics(
     aes_key: retoc::AesKey,
     args: FixKawaiiPhysicsArgs,
 ) -> Result<(), String> {
+    if let Some(input) = args.input.as_deref() {
+        return fix_kawaii_physics_directory(input, args.usmap.as_deref());
+    }
+
     let state = read_saved_state()?;
     let mods_dir = state.game_path;
     let game_paks_dir = state
@@ -66,7 +70,6 @@ pub fn fix_kawaii_physics(
                 obfuscate: false,
                 compression: crate::cli::CompressionArg::Oodle,
                 kawaii_physics: true,
-                kawaii_physics_only: false,
                 kawaii_physics_usmap: Some(usmap.clone()),
                 game_paks_dir: Some(game_paks_dir.clone()),
                 full_iostore_check: false,
@@ -75,6 +78,28 @@ pub fn fix_kawaii_physics(
     }
 
     println!("Wrote fixed mods to {}", args.output.display());
+    Ok(())
+}
+
+fn fix_kawaii_physics_directory(input: &Path, usmap_arg: Option<&Path>) -> Result<(), String> {
+    if !input.is_dir() {
+        return Err(format!("Input is not a directory: {}", input.display()));
+    }
+
+    let saved_usmap = if usmap_arg.is_none() {
+        read_saved_state()
+            .ok()
+            .and_then(|state| state.kawaii_physics_usmap)
+    } else {
+        None
+    };
+    let usmap = kawaii_utils::resolve_kawaii_usmap(usmap_arg.or(saved_usmap.as_deref()))?;
+
+    tracing::info!(input = %input.display(), usmap = %usmap.display(), "Porting KawaiiPhysics assets in-place");
+    println!("Fixing KawaiiPhysics assets in {}", input.display());
+    let ported = retoc::port_kawaii_physics_directory(input, &usmap, true)
+        .map_err(|e| format!("KawaiiPhysics directory fix failed: {e}"))?;
+    println!("Ported {ported} KawaiiPhysics anim nodes");
     Ok(())
 }
 
@@ -116,6 +141,7 @@ fn to_legacy_uasset_fast_batch(
             .map_err(|e| format!("Failed to create {}: {e}", output.display()))?;
         let filter = build_to_legacy_filter(pak.with_extension("utoc"), config.clone());
         items.push(ActionToLegacyBatchItem {
+            inputs: vec![pak.with_extension("utoc")],
             output: output.clone(),
             filter,
         });

@@ -1,3 +1,13 @@
+# v3.2.4
+
+## Changes:
+- Fix KawaiiPhysics batch conversion so package-id collisions across mod variants do not repackage the first matching mod repeatedly.
+- Process nested `.7z`, `.rar`, and `.zip` archives when `retoc-rivals-cli pack` is given a directory of archived mods.
+- Add `retoc-rivals-cli pack-dir` for mixed folders containing raw mod directories, IoStore triples, legacy paks, and archives.
+- Batch IoStore extraction for directory/archive pack inputs so game containers are opened once per input set instead of once per archive.
+- Log mixed-directory scans and archive extraction progress so long `.7z` operations are visible in the CLI.
+- Move in-place KawaiiPhysics asset patching from `pack --kawaii-physics-only` to `fix-kawaii-physics <dir>`.
+
 # v3.2.3
 
 ## Changes:

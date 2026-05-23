@@ -34,7 +34,7 @@ pub fn unpack(aes_key: retoc::AesKey, args: UnpackArgs) -> Result<(), String> {
 }
 
 pub fn unpack_dir(aes_key: retoc::AesKey, args: UnpackDirArgs) -> Result<(), String> {
-    let (iostore, legacy_paks) = scan_directory_packages(&args.input);
+    let (iostore, legacy_paks, _) = scan_directory_packages(&args.input);
     if iostore.is_empty() && legacy_paks.is_empty() {
         return Err(format!("No packages found below {}", args.input.display()));
     }
@@ -190,6 +190,7 @@ fn unpack_source(
         PackageSource::DirectoryPackages {
             iostore,
             legacy_paks,
+            archives: _,
             ..
         } => unpack_package_set(
             aes_key,
