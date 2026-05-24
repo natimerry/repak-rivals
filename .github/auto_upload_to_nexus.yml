@@ -1,12 +1,9 @@
 name: Upload Release to Nexus Mods
 
 on:
-  release:
-    types: [published]
-  workflow_dispatch:
+  workflow_call:
     inputs:
-      tag:
-        description: Git tag for an existing GitHub release
+      plan:
         required: true
         type: string
 
@@ -24,47 +21,23 @@ jobs:
       NEXUS_API_KEY: ${{ secrets.NEXUSMODS_API_KEY }}
       NEXUS_FILE_CATEGORY: ${{ vars.NEXUS_FILE_CATEGORY }}
     steps:
-      - name: Resolve release
-        id: release
+      - name: Validate secrets
         shell: bash
         run: |
-          set -euo pipefail
-
           if [ -z "${NEXUS_API_KEY:-}" ]; then
             echo "Missing required secret: NEXUSMODS_API_KEY" >&2
             exit 1
           fi
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            tag="${{ github.event.inputs.tag }}"
-          else
-            tag="${{ github.event.release.tag_name }}"
-          fi
-
-          release_json="$(gh api "repos/${{ github.repository }}/releases/tags/${tag}")"
-          assets_count="$(jq '[.assets[] | select(.name | endswith(".zip") or endswith(".tar.xz"))] | length' <<<"${release_json}")"
-
-          if [ "${assets_count}" -eq 0 ]; then
-            echo "No .zip or .tar.xz assets found on release ${tag}" >&2
-            exit 1
-          fi
-
-          release_url="$(jq -r '.html_url' <<<"${release_json}")"
-          version="${tag#v}"
-
-          {
-            echo "tag=${tag}"
-            echo "version=${version}"
-            echo "release_url=${release_url}"
-          } >> "${GITHUB_OUTPUT}"
-
       - name: Download release archives
         shell: bash
         run: |
           set -euo pipefail
+          tag="$(echo '${{ inputs.plan }}' | jq -r '.announcement_tag')"
+          repo="${{ github.repository }}"
           mkdir -p incoming
-          gh release download "${{ steps.release.outputs.tag }}" \
-            --repo "${{ github.repository }}" \
+          gh release download "${tag}" \
+            --repo "${repo}" \
             --dir incoming \
             --pattern 'repak-gui-*-pc-windows-msvc.zip' \
             --pattern 'repak-gui-*-unknown-linux-gnu.tar.xz'
@@ -80,8 +53,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Hardcoded file-to-group-ID mappings
-          # Keys are final .zip filenames (tar.xz assets are converted to .zip)
           NEXUS_FILE_GROUP_MAP_JSON='{
             "repak-gui-x86_64-pc-windows-msvc.zip": "1795870",
             "repak-gui-x86_64-unknown-linux-gnu.zip": "1795873"
@@ -106,10 +77,7 @@ jobs:
                   exit 1
                 fi
 
-                (
-                  cd "${temp_dir}"
-                  zip -rq "${GITHUB_WORKSPACE}/prepared/${final_name}" .
-                )
+                (cd "${temp_dir}" && zip -rq "${GITHUB_WORKSPACE}/prepared/${final_name}" .)
                 rm -rf "${temp_dir}"
                 prepared_path="prepared/${final_name}"
                 ;;
@@ -129,7 +97,6 @@ jobs:
               exit 1
             fi
 
-            # Use filename stem as display name
             display_name="${final_name%.zip}"
 
             jq -cn \
@@ -152,6 +119,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          tag="$(echo '${{ inputs.plan }}' | jq -r '.announcement_tag')"
+          version="${tag#v}"
+          release_url="$(gh api "repos/${{ github.repository }}/releases/tags/${tag}" --jq '.html_url')"
 
           api_request() {
             local method="$1"
@@ -178,11 +149,8 @@ jobs:
             local file_path="$1"
             local filename="$2"
             local file_size="$3"
-            local request_body
-            local upload_json
-            local upload_id
-            local presigned_url
 
+            local request_body upload_json upload_id presigned_url
             request_body="$(jq -cn --arg filename "${filename}" --argjson size_bytes "${file_size}" '{filename: $filename, size_bytes: $size_bytes}')"
             upload_json="$(api_request POST "/uploads" "${request_body}")"
             upload_id="$(jq -r '.data.id' <<<"${upload_json}")"
@@ -202,14 +170,9 @@ jobs:
             local file_path="$1"
             local filename="$2"
             local file_size="$3"
-            local request_body
-            local upload_json
-            local upload_id
-            local part_size
-            local complete_url
-            local part_dir
-            local xml_file
-            local part_count
+
+            local request_body upload_json upload_id part_size complete_url
+            local part_dir xml_file part_count
 
             request_body="$(jq -cn --arg filename "${filename}" --argjson size_bytes "${file_size}" '{filename: $filename, size_bytes: $size_bytes}')"
             upload_json="$(api_request POST "/uploads/multipart" "${request_body}")"
@@ -223,7 +186,6 @@ jobs:
             split -b "${part_size}" -d -a 5 --additional-suffix=.part "${file_path}" "${part_dir}/part-"
 
             mapfile -t part_files < <(find "${part_dir}" -maxdepth 1 -type f -name 'part-*' | sort)
-
             mapfile -t part_urls < <(jq -r '.data.parts_presigned_url[]' <<<"${upload_json}")
             part_count="${#part_files[@]}"
 
@@ -250,14 +212,12 @@ jobs:
                 rm -f "${headers_file}"
 
                 if [ -z "${etag}" ]; then
-                  echo "Missing ETag for multipart upload part ${part_number} (${filename})" >&2
+                  echo "Missing ETag for part ${part_number} (${filename})" >&2
                   exit 1
                 fi
 
                 printf '  <Part>\n    <PartNumber>%s</PartNumber>\n    <ETag>%s</ETag>\n  </Part>\n' \
-                  "${part_number}" \
-                  "${etag}" \
-                  >> "${xml_file}"
+                  "${part_number}" "${etag}" >> "${xml_file}"
               done
               echo "</CompleteMultipartUpload>"
             } > "${xml_file}"
@@ -276,54 +236,40 @@ jobs:
           }
 
           finalise_upload() {
-            local upload_id="$1"
-            api_request POST "/uploads/${upload_id}/finalise" >/dev/null
+            api_request POST "/uploads/${1}/finalise" >/dev/null
           }
 
           create_nexus_version() {
-            local group_id="$1"
-            local upload_id="$2"
-            local display_name="$3"
-            local version="$4"
-            local description="$5"
-            local file_category="$6"
-            local request_body
+            local group_id="$1" upload_id="$2" display_name="$3"
+            local version="$4" description="$5" file_category="$6"
 
-            request_body="$(jq -cn \
-              --arg upload_id "${upload_id}" \
-              --arg name "${display_name}" \
-              --arg version "${version}" \
-              --arg description "${description}" \
-              --arg file_category "${file_category}" \
-              '{
-                upload_id: $upload_id,
-                name: $name,
-                version: $version,
-                description: $description,
-                file_category: $file_category
-              }')"
-
-            api_request POST "/mod-file-update-groups/${group_id}/versions" "${request_body}"
+            api_request POST "/mod-file-update-groups/${group_id}/versions" \
+              "$(jq -cn \
+                --arg upload_id "${upload_id}" \
+                --arg name "${display_name}" \
+                --arg version "${version}" \
+                --arg description "${description}" \
+                --arg file_category "${file_category}" \
+                '{upload_id: $upload_id, name: $name, version: $version, description: $description, file_category: $file_category}')"
           }
 
           file_category="${NEXUS_FILE_CATEGORY:-main}"
-          release_description="GitHub release ${{ steps.release.outputs.tag }}: ${{ steps.release.outputs.release_url }}"
-
           case "${file_category}" in
-            main|optional|miscellaneous)
-              ;;
+            main|optional|miscellaneous) ;;
             *)
               echo "NEXUS_FILE_CATEGORY must be one of: main, optional, miscellaneous" >&2
               exit 1
               ;;
           esac
 
+          release_description="GitHub release ${tag}: ${release_url}"
+
           while IFS= read -r item; do
             [ -n "${item}" ] || continue
 
-            file_path="$(jq -r '.path' <<<"${item}")"
-            filename="$(jq -r '.filename' <<<"${item}")"
-            group_id="$(jq -r '.group_id' <<<"${item}")"
+            file_path="$(jq -r '.path'       <<<"${item}")"
+            filename="$(jq -r '.filename'    <<<"${item}")"
+            group_id="$(jq -r '.group_id'    <<<"${item}")"
             display_name="$(jq -r '.display_name' <<<"${item}")"
             file_size="$(stat -c '%s' "${file_path}")"
 
@@ -336,12 +282,8 @@ jobs:
             finalise_upload "${upload_id}"
 
             response="$(create_nexus_version \
-              "${group_id}" \
-              "${upload_id}" \
-              "${display_name}" \
-              "${{ steps.release.outputs.version }}" \
-              "${release_description}" \
-              "${file_category}")"
+              "${group_id}" "${upload_id}" "${display_name}" \
+              "${version}" "${release_description}" "${file_category}")"
 
             nexus_file_id="$(jq -r '.data.id' <<<"${response}")"
             echo "Uploaded ${filename} to Nexus file group ${group_id} as file ${nexus_file_id}"
