@@ -1,14 +1,27 @@
 use std::{
     env,
     ffi::OsStr,
-    fs,
-    io,
+    fs, io,
     path::{Path, PathBuf},
     process::{Command, ExitStatus},
 };
 
-const BINARIES: &[&str] = &["retoc-rivals-cli", "repak-gui"];
 const PACKAGES: &[&str] = &["retoc-rivals-cli", "repak-gui"];
+const ARTIFACTS: &[ArtifactSpec] = &[
+    ArtifactSpec {
+        package: "retoc-rivals-cli",
+        binary: "retoc-rivals-cli",
+    },
+    ArtifactSpec {
+        package: "repak-gui",
+        binary: "repak-gui",
+    },
+];
+
+struct ArtifactSpec {
+    package: &'static str,
+    binary: &'static str,
+}
 
 fn main() {
     if let Err(err) = run() {
@@ -79,14 +92,38 @@ fn collect_targets(args: Vec<String>) -> Result<Vec<String>, Box<dyn std::error:
 
 fn build_self_contained_artifacts(targets: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     for target in targets {
+        ensure_native_target(target)?;
         println!("building self-contained release artifacts for {target}");
         run_cargo_build(target)?;
 
-        let archive = package_target(target)?;
-        println!("created {}", archive.display());
+        for archive in package_target(target)? {
+            println!("created {}", archive.display());
+        }
     }
 
     Ok(())
+}
+
+fn ensure_native_target(target: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let target_os = if target.contains("windows") {
+        "windows"
+    } else if target.contains("linux") {
+        "linux"
+    } else if target.contains("apple") || target.contains("darwin") {
+        "macos"
+    } else {
+        return Err(format!("unsupported target `{target}` for standalone artifacts").into());
+    };
+
+    let host_os = env::consts::OS;
+    if host_os == target_os {
+        Ok(())
+    } else {
+        Err(format!(
+            "refusing to cross-compile standalone artifact `{target}` on `{host_os}`; run this xtask on a native `{target_os}` runner"
+        )
+        .into())
+    }
 }
 
 fn run_cargo_build(target: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -106,34 +143,42 @@ fn run_cargo_build(target: &str) -> Result<(), Box<dyn std::error::Error>> {
     run_command(command)
 }
 
-fn package_target(target: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn package_target(target: &str) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
     let target_dir = Path::new("target");
     let dist_dir = target_dir.join("standalone-dist");
-    let package_name = format!("repak-rivals-{target}-self-contained");
-    let stage_dir = dist_dir.join(&package_name);
-
-    if stage_dir.exists() {
-        fs::remove_dir_all(&stage_dir)?;
-    }
-    fs::create_dir_all(&stage_dir)?;
-
     let build_dir = target_dir.join(target).join("dist");
-    for binary in BINARIES {
-        let binary_name = binary_name(binary, target);
+    let mut archives = Vec::new();
+
+    fs::create_dir_all(&dist_dir)?;
+
+    for artifact in ARTIFACTS {
+        let package_name = format!("{}-{target}-self-contained", artifact.package);
+        let stage_dir = dist_dir.join(&package_name);
+
+        if stage_dir.exists() {
+            fs::remove_dir_all(&stage_dir)?;
+        }
+        fs::create_dir_all(&stage_dir)?;
+
+        let binary_name = binary_name(artifact.binary, target);
         copy_file(build_dir.join(&binary_name), stage_dir.join(&binary_name))?;
+
+        copy_if_exists("README.md", &stage_dir)?;
+        copy_if_exists("CHANGELOG.md", &stage_dir)?;
+        copy_if_exists("LICENSE-MIT", &stage_dir)?;
+        copy_if_exists("LICENSE-APACHE", &stage_dir)?;
+        copy_if_exists("LICENSE-GPL", &stage_dir)?;
+
+        remove_archive_variants(&dist_dir, &package_name)?;
+        let archive = if target.contains("windows") {
+            zip_dir(&dist_dir, &package_name)?
+        } else {
+            tar_xz_dir(&dist_dir, &package_name)?
+        };
+        archives.push(archive);
     }
 
-    copy_if_exists("README.md", &stage_dir)?;
-    copy_if_exists("CHANGELOG.md", &stage_dir)?;
-    copy_if_exists("LICENSE-MIT", &stage_dir)?;
-    copy_if_exists("LICENSE-APACHE", &stage_dir)?;
-    copy_if_exists("LICENSE-GPL", &stage_dir)?;
-
-    if target.contains("windows") {
-        zip_dir(&dist_dir, &package_name)
-    } else {
-        tar_gz_dir(&dist_dir, &package_name)
-    }
+    Ok(archives)
 }
 
 fn copy_file(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
@@ -142,7 +187,11 @@ fn copy_file(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
     fs::copy(from, to).map(|_| ()).map_err(|err| {
         io::Error::new(
             err.kind(),
-            format!("failed to copy {} to {}: {err}", from.display(), to.display()),
+            format!(
+                "failed to copy {} to {}: {err}",
+                from.display(),
+                to.display()
+            ),
         )
     })
 }
@@ -150,7 +199,10 @@ fn copy_file(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
 fn copy_if_exists(path: impl AsRef<Path>, stage_dir: &Path) -> io::Result<()> {
     let path = path.as_ref();
     if path.exists() {
-        copy_file(path, stage_dir.join(path.file_name().unwrap_or_else(|| OsStr::new("file"))))?;
+        copy_file(
+            path,
+            stage_dir.join(path.file_name().unwrap_or_else(|| OsStr::new("file"))),
+        )?;
     }
     Ok(())
 }
@@ -163,11 +215,21 @@ fn binary_name(binary: &str, target: &str) -> String {
     }
 }
 
-fn tar_gz_dir(dist_dir: &Path, package_name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let archive = dist_dir.join(format!("{package_name}.tar.gz"));
+fn remove_archive_variants(dist_dir: &Path, package_name: &str) -> io::Result<()> {
+    for extension in ["tar.gz", "tar.xz", "zip"] {
+        let archive = dist_dir.join(format!("{package_name}.{extension}"));
+        if archive.exists() {
+            fs::remove_file(archive)?;
+        }
+    }
+    Ok(())
+}
+
+fn tar_xz_dir(dist_dir: &Path, package_name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let archive = dist_dir.join(format!("{package_name}.tar.xz"));
     let mut command = Command::new("tar");
     command
-        .arg("-czf")
+        .arg("-cJf")
         .arg(&archive)
         .arg("-C")
         .arg(dist_dir)
@@ -179,6 +241,15 @@ fn tar_gz_dir(dist_dir: &Path, package_name: &str) -> Result<PathBuf, Box<dyn st
 fn zip_dir(dist_dir: &Path, package_name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let archive = dist_dir.join(format!("{package_name}.zip"));
     let source = dist_dir.join(package_name);
+    let script = r#"
+$source = $args[0]
+$dest = $args[1]
+$children = Get-ChildItem -LiteralPath $source
+if (Test-Path -LiteralPath $dest) {
+    Remove-Item -LiteralPath $dest -Force
+}
+Compress-Archive -LiteralPath $children.FullName -DestinationPath $dest -Force
+"#;
 
     if command_exists("powershell") {
         let mut command = Command::new("powershell");
@@ -186,7 +257,7 @@ fn zip_dir(dist_dir: &Path, package_name: &str) -> Result<PathBuf, Box<dyn std::
             .arg("-NoLogo")
             .arg("-NoProfile")
             .arg("-Command")
-            .arg("Compress-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force")
+            .arg(script)
             .arg(source)
             .arg(&archive);
         run_command(command)?;
@@ -196,7 +267,7 @@ fn zip_dir(dist_dir: &Path, package_name: &str) -> Result<PathBuf, Box<dyn std::
             .arg("-NoLogo")
             .arg("-NoProfile")
             .arg("-Command")
-            .arg("Compress-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force")
+            .arg(script)
             .arg(source)
             .arg(&archive);
         run_command(command)?;

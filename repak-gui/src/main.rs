@@ -7,6 +7,7 @@ mod install_mod;
 mod install_terminal;
 mod launch_game;
 mod main_ui;
+mod updater;
 mod utils;
 
 pub mod ios_widget;
@@ -21,7 +22,6 @@ use crate::main_ui::RepakModManager;
 use crate::utils::SkinEntry;
 use eframe::egui::{self, IconData};
 use retoc::{action_unpack, ActionUnpack, FGuid};
-use semver::Version;
 use std::cell::LazyCell;
 use std::collections::HashMap;
 use std::env::args;
@@ -366,59 +366,6 @@ pub fn fetch_mesh_list_in_bg(
 }
 
 #[derive(serde::Deserialize)]
-struct GithubRelease {
-    tag_name: String,
-}
-
-#[instrument(skip(current_version), fields(current_version))]
-pub fn check_repak_rivals_version(current_version: &str) {
-    let client = reqwest::blocking::Client::new();
-
-    let req = client
-        .get("https://api.github.com/repos/natimerry/repak-rivals/releases/latest")
-        .header("User-Agent", "repak-rivals-version-check")
-        .send();
-
-    if let Err(e) = req {
-        rfd::MessageDialog::new()
-            .set_title("Failed to query for the latest version")
-            .set_buttons(rfd::MessageButtons::Ok)
-            .set_description(format!(
-                "Repak has failed to query the GitHub API to check for the latest version: {e}"
-            ))
-            .show();
-        return;
-    }
-
-    let req = req.unwrap();
-
-    let release: GithubRelease =
-        serde_json::from_str(&req.text().expect("failed to parse GitHub response"))
-            .expect("Failed to get release data");
-
-    let latest = release.tag_name.trim_start_matches('v');
-
-    let latest_version = Version::parse(latest).expect("invalid latest version format");
-    let current_version = Version::parse(current_version).expect("invalid current version format");
-
-    if current_version < latest_version {
-        rfd::MessageDialog::new()
-            .set_title("⚠️ Update Required")
-            .set_buttons(rfd::MessageButtons::Ok)
-            .set_description(format!(
-                "A new version of repak-rivals is available!\n\n\
-                Current version:  v{current_version}\n\
-                Latest version:   v{latest_version}\n\n\
-                Please download the latest release from:\n\
-                https://github.com/natimerry/repak-rivals/releases/latest\n\n\
-                The application will now exit."
-            ))
-            .show();
-        std::process::exit(1);
-    }
-}
-
-#[derive(serde::Deserialize)]
 struct CliState {
     game_path: PathBuf,
     game_chunk_path: Option<PathBuf>,
@@ -570,11 +517,6 @@ fn main() {
         "Logger initialized at {:?}; egui-family targets restricted to info and above",
         log_path
     );
-
-    #[cfg(not(debug_assertions))]
-    if !fix_kawaii_physics_cli {
-        check_repak_rivals_version(env!("CARGO_PKG_VERSION"));
-    }
 
     /*
         Custom baked CLI utility for tobi, if the program detects a specific argument passed to it, it does not spaw GUI
@@ -792,7 +734,8 @@ fn init_tracing(log_path: &std::path::Path) -> tracing_appender::non_blocking::W
         .with_default(LevelFilter::DEBUG)
         .with_target("egui", LevelFilter::OFF)
         .with_target("eframe", LevelFilter::OFF)
-        .with_target("epaint", LevelFilter::OFF);
+        .with_target("epaint", LevelFilter::OFF)
+        .with_target("winit", LevelFilter::INFO);
     let egui_filter = Targets::default()
         .with_default(LevelFilter::OFF)
         .with_target("egui", LevelFilter::INFO)

@@ -3,7 +3,7 @@
 Each release has two builds for each platform:
 
 - Normal: smaller download, faster KawaiiPhysics porting, requires a local .NET runtime.
-- Self-contained: larger download, named with `self-contained`, bundles the KawaiiPhysics .NET helper so users do not need to install .NET separately.
+- Self-contained: larger download, named with `self-contained`, bundles the KawaiiPhysics .NET helper so users do not need to install .NET separately. These are published next to the normal cargo-dist archives for each app and platform.
 
 Use the normal build if you already have .NET installed. Use the self-contained build if KawaiiPhysics fails with a .NET, hostfxr, or runtime dependency error.
 

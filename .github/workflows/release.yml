@@ -64,9 +64,9 @@ jobs:
         # we specify bash to get pipefail; it guards against the `curl` command
         # failing. otherwise `sh` won't catch that `curl` returned non-0
         shell: bash
-        run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.31.0/cargo-dist-installer.sh | sh"
+        run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.32.0/cargo-dist-installer.sh | sh"
       - name: Cache dist
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: cargo-dist-cache
           path: ~/.cargo/bin/dist
@@ -82,7 +82,7 @@ jobs:
           cat plan-dist-manifest.json
           echo "manifest=$(jq -c "." plan-dist-manifest.json)" >> "$GITHUB_OUTPUT"
       - name: "Upload dist-manifest.json"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: artifacts-plan-dist-manifest
           path: plan-dist-manifest.json
@@ -142,7 +142,7 @@ jobs:
         run: ${{ matrix.install_dist.run }}
       # Get the dist-manifest
       - name: Fetch local artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: artifacts-*
           path: target/distrib/
@@ -162,48 +162,32 @@ jobs:
         # inconsistent syntax between shell and powershell.
         shell: bash
         run: |
-          mkdir -p target/upload-artifacts
-
-          # Parse out what we just built, copy it aside, and upload it to scratch storage.
-          # The self-contained build below reuses cargo-dist and may overwrite target/distrib.
-          mapfile -t normal_paths < <(dist print-upload-files-from-manifest --manifest dist-manifest.json)
-          for path in "${normal_paths[@]}"; do
-            if [ -f "$path" ]; then
-              cp "$path" "target/upload-artifacts/$(basename "$path")"
-            fi
-          done
-
-          cp dist-manifest.json "$BUILD_MANIFEST_NAME"
-
           if [ "${{ needs.plan.outputs.publishing }}" = "true" ]; then
-            RETOC_KAWAII_BINDING_SELF_CONTAINED=true \
-              dist build ${{ needs.plan.outputs.tag-flag }} --print=linkage --output-format=json ${{ matrix.dist_args }} > dist-manifest-self-contained.json
-            echo "self-contained dist build ran successfully"
-
-            mapfile -t self_contained_paths < <(dist print-upload-files-from-manifest --manifest dist-manifest-self-contained.json)
-            for path in "${self_contained_paths[@]}"; do
-              if [ ! -f "$path" ]; then
-                continue
-              fi
-
-              base="$(basename "$path")"
-              case "$base" in
-                *.tar.xz) out="${base%.tar.xz}-self-contained.tar.xz" ;;
-                *.tar.gz) out="${base%.tar.gz}-self-contained.tar.gz" ;;
-                *.zip) out="${base%.zip}-self-contained.zip" ;;
-                *.msi) out="${base%.msi}-self-contained.msi" ;;
-                *) out="${base}-self-contained" ;;
-              esac
-
-              cp "$path" "target/upload-artifacts/$out"
-            done
+            case "${{ runner.os }}:${{ join(matrix.targets, ' ') }}" in
+              Linux:*linux*) ;;
+              Windows:*windows*) ;;
+              *)
+                echo "::error::Standalone artifacts must be built on a native runner, got runner=${{ runner.os }} targets=${{ join(matrix.targets, ' ') }}"
+                exit 1
+                ;;
+            esac
+            cargo run --package xtask -- standalone-artifacts ${{ join(matrix.targets, ' ') }}
           fi
 
+          # Parse out what we just built and upload it to scratch storage.
+          # The standalone artifacts are intentionally outside dist's manifest:
+          # dist builds the normal app archives, and xtask adds the opt-in
+          # self-contained variants for the same target matrix row.
           echo "paths<<EOF" >> "$GITHUB_OUTPUT"
-          find target/upload-artifacts -maxdepth 1 -type f | sort >> "$GITHUB_OUTPUT"
+          dist print-upload-files-from-manifest --manifest dist-manifest.json >> "$GITHUB_OUTPUT"
+          if [ -d target/standalone-dist ]; then
+            find target/standalone-dist -maxdepth 1 -type f | sort >> "$GITHUB_OUTPUT"
+          fi
           echo "EOF" >> "$GITHUB_OUTPUT"
+
+          cp dist-manifest.json "$BUILD_MANIFEST_NAME"
       - name: "Upload artifacts"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: artifacts-build-local-${{ join(matrix.targets, '_') }}
           path: |
@@ -225,14 +209,14 @@ jobs:
           persist-credentials: false
           submodules: recursive
       - name: Install cached dist
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: cargo-dist-cache
           path: ~/.cargo/bin/
       - run: chmod +x ~/.cargo/bin/dist
       # Get all the local artifacts for the global tasks to use (for e.g. checksums)
       - name: Fetch local artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: artifacts-*
           path: target/distrib/
@@ -250,7 +234,7 @@ jobs:
 
           cp dist-manifest.json "$BUILD_MANIFEST_NAME"
       - name: "Upload artifacts"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: artifacts-build-global
           path: |
@@ -275,14 +259,14 @@ jobs:
           persist-credentials: false
           submodules: recursive
       - name: Install cached dist
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: cargo-dist-cache
           path: ~/.cargo/bin/
       - run: chmod +x ~/.cargo/bin/dist
       # Fetch artifacts from scratch-storage
       - name: Fetch artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: artifacts-*
           path: target/distrib/
@@ -295,14 +279,14 @@ jobs:
           cat dist-manifest.json
           echo "manifest=$(jq -c "." dist-manifest.json)" >> "$GITHUB_OUTPUT"
       - name: "Upload dist-manifest.json"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           # Overwrite the previous copy
           name: artifacts-dist-manifest
           path: dist-manifest.json
       # Create a GitHub Release while uploading all files to it
       - name: "Download GitHub Artifacts"
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: artifacts-*
           path: artifacts

@@ -35,6 +35,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
+use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, instrument, trace, warn};
 use walkdir::WalkDir;
@@ -74,6 +75,12 @@ pub struct RepakModManager {
     pending_refresh_at: Option<Instant>,
     #[serde(skip)]
     metadata_cache_dirty: bool,
+    #[serde(skip)]
+    update_receiver: Option<Receiver<crate::updater::UpdateMessage>>,
+    #[serde(skip)]
+    update_state: UpdateUiState,
+    #[serde(skip)]
+    update_check_started: bool,
 
     #[serde(skip)]
     welcome_screen: Option<ShowWelcome>,
@@ -170,6 +177,24 @@ struct MetadataResult {
 enum MetadataMessage {
     Entry(MetadataResult),
     Done(u64),
+}
+
+#[derive(Clone, Default)]
+enum UpdateUiState {
+    #[default]
+    Idle,
+    Checking,
+    Available(crate::updater::AvailableUpdate),
+    Installing {
+        update: crate::updater::AvailableUpdate,
+        log: Vec<String>,
+    },
+    Failed {
+        update: Option<crate::updater::AvailableUpdate>,
+        error: String,
+        log: Vec<String>,
+    },
+    Restarting(String),
 }
 
 struct SelectedPakDetails {
@@ -1367,6 +1392,345 @@ impl RepakModManager {
         Ok(())
     }
 
+    fn start_update_check(&mut self, show_checking_window: bool) {
+        if self.update_check_started && !show_checking_window {
+            return;
+        }
+
+        self.update_check_started = true;
+        let (tx, rx) = channel();
+        self.update_receiver = Some(rx);
+        if show_checking_window {
+            self.update_state = UpdateUiState::Checking;
+        }
+
+        thread::spawn(move || {
+            let result = crate::updater::check_for_update(VERSION);
+            let _ = tx.send(crate::updater::UpdateMessage::CheckFinished(result));
+        });
+    }
+
+    fn start_update_install(&mut self, update: crate::updater::AvailableUpdate) {
+        let (tx, rx) = channel();
+        self.update_receiver = Some(rx);
+        self.update_state = UpdateUiState::Installing {
+            update: update.clone(),
+            log: vec![format!("Starting update to v{}", update.latest_version)],
+        };
+
+        thread::spawn(move || {
+            let result = crate::updater::download_and_prepare_update(update, tx.clone());
+            let _ = tx.send(crate::updater::UpdateMessage::InstallFinished(result));
+        });
+    }
+
+    fn process_update_messages(&mut self, ctx: &egui::Context) {
+        let Some(receiver) = &self.update_receiver else {
+            return;
+        };
+
+        let messages = receiver.try_iter().collect::<Vec<_>>();
+        if messages.is_empty() {
+            return;
+        }
+
+        for message in messages {
+            match message {
+                crate::updater::UpdateMessage::CheckFinished(result) => match result {
+                    Ok(Some(update)) => {
+                        info!(
+                            current = %update.current_version,
+                            latest = %update.latest_version,
+                            asset = %update.asset_name,
+                            "Update available"
+                        );
+                        self.update_state = UpdateUiState::Available(update);
+                    }
+                    Ok(None) => {
+                        if matches!(self.update_state, UpdateUiState::Checking) {
+                            self.update_state = UpdateUiState::Restarting(
+                                "Repak is already up to date.".to_string(),
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        warn!(error = %error, "Update check failed");
+                        if matches!(self.update_state, UpdateUiState::Checking) {
+                            self.update_state = UpdateUiState::Failed {
+                                update: None,
+                                error,
+                                log: Vec::new(),
+                            };
+                        }
+                    }
+                },
+                crate::updater::UpdateMessage::InstallProgress(message) => {
+                    if let UpdateUiState::Installing { log, .. } = &mut self.update_state {
+                        log.push(message);
+                    }
+                }
+                crate::updater::UpdateMessage::InstallFinished(result) => match result {
+                    Ok(prepared) => {
+                        if let Err(e) = self.save_state() {
+                            warn!(error = %e, "Failed to save state before applying update");
+                        }
+
+                        match crate::updater::spawn_replace_and_restart(&prepared) {
+                            Ok(()) => {
+                                self.update_state = UpdateUiState::Restarting(
+                                    "Update downloaded. Repak will close, replace itself, and restart."
+                                        .to_string(),
+                                );
+                                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                            }
+                            Err(error) => {
+                                let update = if let UpdateUiState::Installing { update, .. } =
+                                    &self.update_state
+                                {
+                                    Some(update.clone())
+                                } else {
+                                    None
+                                };
+                                self.update_state = UpdateUiState::Failed {
+                                    update,
+                                    error,
+                                    log: Vec::new(),
+                                };
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        let (update, log) =
+                            if let UpdateUiState::Installing { update, log } = &self.update_state {
+                                (Some(update.clone()), log.clone())
+                            } else {
+                                (None, Vec::new())
+                            };
+                        self.update_state = UpdateUiState::Failed { update, error, log };
+                    }
+                },
+            }
+        }
+
+        ctx.request_repaint();
+    }
+
+    fn show_update_window(&mut self, ctx: &egui::Context) {
+        enum UpdateAction {
+            Start(crate::updater::AvailableUpdate),
+            Skip,
+            Dismiss,
+            Retry(crate::updater::AvailableUpdate),
+        }
+
+        let snapshot = self.update_state.clone();
+        let mut action = None;
+
+        match snapshot {
+            UpdateUiState::Idle => return,
+            UpdateUiState::Checking => {
+                egui::Window::new("Checking for updates")
+                    .collapsible(false)
+                    .resizable(false)
+                    .show(ctx, |ui| {
+                        ui.label("Checking GitHub for the latest repak-rivals release...");
+                    });
+            }
+            UpdateUiState::Available(update) => {
+                let window_size = update_window_size(ctx);
+                egui::Window::new("Repak update available")
+                    .collapsible(false)
+                    .resizable(true)
+                    .default_size(window_size)
+                    .min_width(760.0)
+                    .min_height(460.0)
+                    .show(ctx, |ui| {
+                        ui.set_min_size(window_size);
+                        let (left_width, right_width, scroll_height) = update_window_layout(ui);
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.set_width(left_width);
+                                ui.heading("Update");
+                                ui.add_space(8.0);
+                                ui.label(format!("Current: v{}", update.current_version));
+                                ui.label(format!("Latest: v{}", update.latest_version));
+                                ui.add(Label::new(format!("Asset: {}", update.asset_name)).wrap());
+                                ui.add_space(12.0);
+                                ui.add(
+                                    Label::new(
+                                        "You can update now or skip and keep using this version.",
+                                    )
+                                    .wrap(),
+                                );
+                                ui.add_space(12.0);
+
+                                if ui
+                                    .add_sized(
+                                        [left_width, 30.0],
+                                        Button::new(
+                                            RichText::new("Update and restart")
+                                                .color(Color32::WHITE),
+                                        )
+                                        .fill(RED_THEME_COLOR),
+                                    )
+                                    .clicked()
+                                {
+                                    action = Some(UpdateAction::Start(update.clone()));
+                                }
+
+                                if ui
+                                    .add_sized([left_width, 28.0], Button::new("Skip for now"))
+                                    .clicked()
+                                {
+                                    action = Some(UpdateAction::Skip);
+                                }
+                            });
+
+                            ui.separator();
+
+                            ui.vertical(|ui| {
+                                ui.set_width(right_width);
+                                ui.heading("CHANGELOG.md");
+                                ui.add_space(8.0);
+                                ScrollArea::vertical()
+                                    .id_salt("update_changelog")
+                                    .max_height(scroll_height)
+                                    .show(ui, |ui| {
+                                        render_changelog(ui, &update.changelog);
+                                    });
+                            });
+                        });
+                    });
+            }
+            UpdateUiState::Installing { update, log } => {
+                let window_size = update_window_size(ctx);
+                egui::Window::new("Updating Repak")
+                    .collapsible(false)
+                    .resizable(true)
+                    .default_size(window_size)
+                    .min_width(760.0)
+                    .min_height(460.0)
+                    .show(ctx, |ui| {
+                        ui.set_min_size(window_size);
+                        let (left_width, right_width, scroll_height) = update_window_layout(ui);
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.set_width(left_width);
+                                ui.heading("Installing");
+                                ui.add_space(8.0);
+                                ui.label(format!("Target: v{}", update.latest_version));
+                                ui.add(Label::new(format!("Asset: {}", update.asset_name)).wrap());
+                                ui.add_space(12.0);
+                                ui.spinner();
+                                ui.add(Label::new("Downloading and staging the update...").wrap());
+                            });
+
+                            ui.separator();
+
+                            ui.vertical(|ui| {
+                                ui.set_width(right_width);
+                                ui.heading("Progress");
+                                ui.add_space(8.0);
+                                ScrollArea::vertical()
+                                    .id_salt("update_progress")
+                                    .max_height(scroll_height)
+                                    .show(ui, |ui| {
+                                        for line in &log {
+                                            ui.monospace(line);
+                                        }
+                                    });
+                            });
+                        });
+                    });
+            }
+            UpdateUiState::Failed { update, error, log } => {
+                let window_size = update_window_size(ctx);
+                egui::Window::new("Update failed")
+                    .collapsible(false)
+                    .resizable(true)
+                    .default_size(window_size)
+                    .min_width(760.0)
+                    .min_height(460.0)
+                    .show(ctx, |ui| {
+                        ui.set_min_size(window_size);
+                        let (left_width, right_width, scroll_height) = update_window_layout(ui);
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.set_width(left_width);
+                                ui.heading("Problem");
+                                ui.add_space(8.0);
+                                ui.add(
+                                    Label::new(
+                                        RichText::new(&error)
+                                            .color(Color32::from_rgb(255, 145, 160)),
+                                    )
+                                    .wrap(),
+                                );
+                                ui.add_space(12.0);
+
+                                if let Some(update) = update.clone() {
+                                    if ui
+                                        .add_sized([left_width, 28.0], Button::new("Try again"))
+                                        .clicked()
+                                    {
+                                        action = Some(UpdateAction::Retry(update));
+                                    }
+                                }
+
+                                if ui
+                                    .add_sized([left_width, 28.0], Button::new("Close"))
+                                    .clicked()
+                                {
+                                    action = Some(UpdateAction::Dismiss);
+                                }
+                            });
+
+                            ui.separator();
+
+                            ui.vertical(|ui| {
+                                ui.set_width(right_width);
+                                ui.heading("Progress");
+                                ui.add_space(8.0);
+                                ScrollArea::vertical()
+                                    .id_salt("update_failed_progress")
+                                    .max_height(scroll_height)
+                                    .show(ui, |ui| {
+                                        if log.is_empty() {
+                                            ui.label("No progress was recorded.");
+                                        } else {
+                                            for line in &log {
+                                                ui.monospace(line);
+                                            }
+                                        }
+                                    });
+                            });
+                        });
+                    });
+            }
+            UpdateUiState::Restarting(message) => {
+                egui::Window::new("Repak updater")
+                    .collapsible(false)
+                    .resizable(false)
+                    .show(ctx, |ui| {
+                        ui.label(message);
+                        if ui.button("Close").clicked() {
+                            action = Some(UpdateAction::Dismiss);
+                        }
+                    });
+            }
+        }
+
+        match action {
+            Some(UpdateAction::Start(update)) | Some(UpdateAction::Retry(update)) => {
+                self.start_update_install(update);
+            }
+            Some(UpdateAction::Skip) | Some(UpdateAction::Dismiss) => {
+                self.update_state = UpdateUiState::Idle;
+            }
+            None => {}
+        }
+    }
+
     fn update_kawaii_usmap_if_needed(&mut self, needs_mapping: bool) {
         if !needs_mapping {
             return;
@@ -1574,6 +1938,10 @@ impl RepakModManager {
                 ui.label("Font Size: ");
                 ui.add(egui::Slider::new(&mut self.default_font_size, 12.0..=32.0));
                 set_custom_font_size(ui.ctx(), self.default_font_size);
+                if ui.button("Check for updates").clicked() {
+                    ui.close_menu();
+                    self.start_update_check(true);
+                }
                 ui.horizontal(|ui| {
                     ui.label("Show Load Order Suffix");
                     ui.add(ios_widget::toggle(&mut self.show_load_order_suffix));
@@ -1757,6 +2125,12 @@ impl RepakModManager {
 impl eframe::App for RepakModManager {
     #[instrument(skip(self, ctx, _frame))]
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if !self.update_check_started {
+            self.start_update_check(false);
+        }
+        self.process_update_messages(ctx);
+        self.show_update_window(ctx);
+
         if let Some(ref mut welcome) = self.welcome_screen {
             if !self.hide_welcome {
                 welcome.welcome_screen(ctx, &mut self.hide_welcome);
@@ -1850,6 +2224,47 @@ impl eframe::App for RepakModManager {
             }
         }
     }
+}
+
+fn render_changelog(ui: &mut egui::Ui, changelog: &str) {
+    for line in changelog.lines() {
+        let trimmed = line.trim();
+        if let Some(heading) = trimmed.strip_prefix("## ") {
+            ui.add_space(8.0);
+            ui.heading(heading);
+        } else if let Some(heading) = trimmed.strip_prefix("### ") {
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(heading)
+                    .strong()
+                    .color(Color32::from_rgb(255, 190, 125)),
+            );
+        } else if let Some(item) = trimmed.strip_prefix("- ") {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("•");
+                ui.add(Label::new(item).wrap());
+            });
+        } else if trimmed.is_empty() {
+            ui.add_space(4.0);
+        } else {
+            ui.add(Label::new(trimmed).wrap());
+        }
+    }
+}
+
+fn update_window_size(ctx: &egui::Context) -> egui::Vec2 {
+    let screen = ctx.screen_rect();
+    egui::vec2(
+        (screen.width() * 0.74).clamp(760.0, 1040.0),
+        (screen.height() * 0.72).clamp(460.0, 680.0),
+    )
+}
+
+fn update_window_layout(ui: &egui::Ui) -> (f32, f32, f32) {
+    let left_width = 230.0;
+    let right_width = (ui.available_width() - left_width - 22.0).max(420.0);
+    let scroll_height = (ui.available_height() - 48.0).max(300.0);
+    (left_width, right_width, scroll_height)
 }
 
 fn normalize_mod_display_name(name: &str) -> String {
