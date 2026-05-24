@@ -80,6 +80,12 @@ pub struct RepakModManager {
     #[serde(skip)]
     update_state: UpdateUiState,
     #[serde(skip)]
+    fix_kawaii_progress: Arc<AtomicI32>,
+    #[serde(skip)]
+    fix_kawaii_worker: Option<thread::JoinHandle<Result<(), String>>>,
+    #[serde(skip)]
+    show_fix_kawaii_terminal: bool,
+    #[serde(skip)]
     update_check_started: bool,
     #[serde(skip)]
     kawaii_runtime_receiver: Option<Receiver<String>>,
@@ -1098,7 +1104,15 @@ impl RepakModManager {
                 }
             }
 
-            if ui.button("Fix KawaiiPhysics").clicked() {
+            let fix_kawaii_running = self
+                .fix_kawaii_worker
+                .as_ref()
+                .map(|worker| !worker.is_finished())
+                .unwrap_or(false);
+            if ui
+                .add_enabled(!fix_kawaii_running, Button::new("Fix KawaiiPhysics"))
+                .clicked()
+            {
                 let Some(game_chunk_path) = self.game_chunk_path.clone() else {
                     warn!("Cannot fix KawaiiPhysics without a detected game chunk path");
                     return;
@@ -1138,29 +1152,29 @@ impl RepakModManager {
                     extracted_archive_dir: None,
                 };
 
-                #[cfg(all(windows, not(debug_assertions)))]
-                {
-                    crate::ensure_console();
+                crate::install_terminal::clear_terminal();
+                self.show_fix_kawaii_terminal = true;
+                self.fix_kawaii_progress = Arc::new(AtomicI32::new(0));
+                #[cfg(windows)]
+                if crate::has_attached_console() {
                     crate::redirect_stdio();
                 }
 
-                let result = fix_installed_iostore_kawaii_physics(
-                    &installable_mod,
-                    &self.game_path,
-                    Arc::new(AtomicI32::new(0)),
-                    &Some(game_chunk_path),
-                    &Some(kawaii_physics_usmap),
-                );
-
-                #[cfg(all(windows, not(debug_assertions)))]
-                crate::free_console();
-
-                if let Err(e) = result {
-                    self.kawaii_runtime_state = KawaiiRuntimeUiState::Choices {
-                        error: e.to_string(),
-                    };
-                    error!(error = %e, "Failed to fix installed IoStore KawaiiPhysics");
-                }
+                let game_path = self.game_path.clone();
+                let progress = self.fix_kawaii_progress.clone();
+                info!(mod_name = %installable_mod.mod_name, "Starting KawaiiPhysics fix worker with egui terminal progress");
+                self.fix_kawaii_worker = Some(thread::spawn(move || {
+                    let result = fix_installed_iostore_kawaii_physics(
+                        &installable_mod,
+                        &game_path,
+                        progress.clone(),
+                        &Some(game_chunk_path),
+                        &Some(kawaii_physics_usmap),
+                    )
+                    .map_err(|e| e.to_string());
+                    progress.store(-255, Ordering::SeqCst);
+                    result
+                }));
             }
         }
         if ui.button("Delete mod").clicked() {
@@ -1568,6 +1582,49 @@ impl RepakModManager {
             };
             ctx.request_repaint();
         }
+    }
+
+    fn process_fix_kawaii_worker(&mut self, ctx: &egui::Context) {
+        if self.show_fix_kawaii_terminal {
+            let install_done = self.fix_kawaii_progress.load(Ordering::SeqCst) == -255;
+            if !crate::install_terminal::show_install_terminal(ctx, install_done) {
+                self.show_fix_kawaii_terminal = false;
+            }
+        }
+
+        let worker_finished = self
+            .fix_kawaii_worker
+            .as_ref()
+            .map(|worker| worker.is_finished())
+            .unwrap_or(false);
+        if !worker_finished {
+            return;
+        }
+
+        let Some(worker) = self.fix_kawaii_worker.take() else {
+            return;
+        };
+
+        match worker.join() {
+            Ok(Ok(())) => {
+                info!("Finished fixing installed IoStore KawaiiPhysics");
+                self.collect_pak_files();
+            }
+            Ok(Err(error)) => {
+                self.kawaii_runtime_state = KawaiiRuntimeUiState::Choices {
+                    error: error.clone(),
+                };
+                error!(error = %error, "Failed to fix installed IoStore KawaiiPhysics");
+            }
+            Err(_) => {
+                self.kawaii_runtime_state = KawaiiRuntimeUiState::Choices {
+                    error: "KawaiiPhysics fix worker panicked".to_string(),
+                };
+                error!("KawaiiPhysics fix worker panicked");
+            }
+        }
+        self.fix_kawaii_progress.store(-255, Ordering::SeqCst);
+        ctx.request_repaint();
     }
 
     fn show_kawaii_runtime_window(&mut self, ctx: &egui::Context) {
@@ -2348,6 +2405,7 @@ impl eframe::App for RepakModManager {
         }
         self.process_update_messages(ctx);
         self.show_update_window(ctx);
+        self.process_fix_kawaii_worker(ctx);
         self.process_kawaii_runtime_messages(ctx);
         self.show_kawaii_runtime_window(ctx);
 
