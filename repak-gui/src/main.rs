@@ -18,7 +18,7 @@ use crate::install_mod::install_mod_logic::iotoc::{
     convert_directory_to_iostore, to_legacy_uasset_fast_batch,
 };
 use crate::install_mod::map_to_mods_internal;
-use crate::main_ui::RepakModManager;
+use crate::main_ui::{setup_custom_style, RepakModManager};
 use crate::utils::SkinEntry;
 use eframe::egui::{self, IconData};
 use retoc::{action_unpack, ActionUnpack, FGuid};
@@ -708,8 +708,7 @@ fn main() {
         "Repak GUI",
         options,
         Box::new(|cc| {
-            cc.egui_ctx
-                .style_mut(|style| style.visuals.dark_mode = true);
+            setup_custom_style(&cc.egui_ctx);
             Ok(Box::new(
                 RepakModManager::load(cc, path_reset).expect("Unable to load config"),
             ))

@@ -243,15 +243,13 @@ impl ModInstallRequest {
                                     let needs_to_legacy_console =
                                         install_needs_to_legacy_console(&mods);
                                     if needs_to_legacy_console {
+                                        crate::install_terminal::clear_terminal();
+                                        self.show_terminal_progress = true;
+                                        #[cfg(windows)]
                                         if crate::has_attached_console() {
-                                            #[cfg(windows)]
                                             crate::redirect_stdio();
-                                            info!("Starting install worker with attached console");
-                                        } else {
-                                            crate::install_terminal::clear_terminal();
-                                            self.show_terminal_progress = true;
-                                            info!("Starting install worker with egui terminal progress");
                                         }
+                                        info!("Starting install worker with egui terminal progress");
                                     } else {
                                         info!("Starting install worker");
                                     }

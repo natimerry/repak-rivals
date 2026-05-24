@@ -20,7 +20,7 @@ use eframe::egui::{
 use egui_flex::{item, Flex, FlexAlign};
 use install_mod::install_mod_logic::pak_files::extract_pak_to_dir;
 use install_mod::install_mod_logic::{
-    fix_installed_iostore_kawaii_physics, show_kawaii_error_dialog_if_relevant,
+    fix_installed_iostore_kawaii_physics, register_kawaii_runtime_error_sender,
 };
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use path_clean::PathClean;
@@ -81,6 +81,10 @@ pub struct RepakModManager {
     update_state: UpdateUiState,
     #[serde(skip)]
     update_check_started: bool,
+    #[serde(skip)]
+    kawaii_runtime_receiver: Option<Receiver<String>>,
+    #[serde(skip)]
+    kawaii_runtime_state: KawaiiRuntimeUiState,
 
     #[serde(skip)]
     welcome_screen: Option<ShowWelcome>,
@@ -197,6 +201,18 @@ enum UpdateUiState {
     Restarting(String),
 }
 
+#[derive(Clone, Default)]
+enum KawaiiRuntimeUiState {
+    #[default]
+    Hidden,
+    Choices {
+        error: String,
+    },
+    LinuxCommands {
+        error: String,
+    },
+}
+
 struct SelectedPakDetails {
     path: PathBuf,
     mount_point: String,
@@ -221,6 +237,10 @@ fn use_dark_red_accent(style: &mut Style) {
 }
 
 pub fn setup_custom_style(ctx: &egui::Context) {
+    ctx.set_theme(Theme::Dark);
+    ctx.send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Dark));
+    ctx.set_visuals_of(Theme::Dark, egui::Visuals::dark());
+    ctx.set_visuals_of(Theme::Light, egui::Visuals::dark());
     ctx.style_mut_of(Theme::Dark, use_dark_red_accent);
     ctx.style_mut_of(Theme::Light, use_dark_red_accent);
 }
@@ -1136,7 +1156,9 @@ impl RepakModManager {
                 crate::free_console();
 
                 if let Err(e) = result {
-                    show_kawaii_error_dialog_if_relevant(&e.to_string());
+                    self.kawaii_runtime_state = KawaiiRuntimeUiState::Choices {
+                        error: e.to_string(),
+                    };
                     error!(error = %e, "Failed to fix installed IoStore KawaiiPhysics");
                 }
             }
@@ -1310,6 +1332,8 @@ impl RepakModManager {
     #[instrument(skip(ctx))]
     pub fn load(ctx: &eframe::CreationContext, path_reset: bool) -> std::io::Result<Self> {
         let (tx, rx) = channel();
+        let (kawaii_tx, kawaii_rx) = channel();
+        register_kawaii_runtime_error_sender(kawaii_tx);
         let path = Self::config_path();
         let mut persist_config = false;
         let mut shit = if path.exists() {
@@ -1360,6 +1384,7 @@ impl RepakModManager {
             config.welcome_screen = Some(ShowWelcome {});
             config.receiver = Some(rx);
             config.watcher_tx = Some(tx.clone());
+            config.kawaii_runtime_receiver = Some(kawaii_rx);
 
             Ok(config)
         } else {
@@ -1369,6 +1394,7 @@ impl RepakModManager {
             x.hide_welcome = false;
             x.receiver = Some(rx);
             x.watcher_tx = Some(tx.clone());
+            x.kawaii_runtime_receiver = Some(kawaii_rx);
             Ok(x)
         };
 
@@ -1421,6 +1447,17 @@ impl RepakModManager {
         thread::spawn(move || {
             let result = crate::updater::download_and_prepare_update(update, tx.clone());
             let _ = tx.send(crate::updater::UpdateMessage::InstallFinished(result));
+        });
+    }
+
+    fn start_self_contained_switch(&mut self) {
+        let (tx, rx) = channel();
+        self.update_receiver = Some(rx);
+        self.update_state = UpdateUiState::Checking;
+
+        thread::spawn(move || {
+            let result = crate::updater::check_for_self_contained_repak_gui(VERSION).map(Some);
+            let _ = tx.send(crate::updater::UpdateMessage::CheckFinished(result));
         });
     }
 
@@ -1515,6 +1552,186 @@ impl RepakModManager {
         ctx.request_repaint();
     }
 
+    fn process_kawaii_runtime_messages(&mut self, ctx: &egui::Context) {
+        let Some(receiver) = &self.kawaii_runtime_receiver else {
+            return;
+        };
+
+        let messages = receiver.try_iter().collect::<Vec<_>>();
+        if messages.is_empty() {
+            return;
+        }
+
+        if let Some(error) = messages.last() {
+            self.kawaii_runtime_state = KawaiiRuntimeUiState::Choices {
+                error: error.clone(),
+            };
+            ctx.request_repaint();
+        }
+    }
+
+    fn show_kawaii_runtime_window(&mut self, ctx: &egui::Context) {
+        enum KawaiiAction {
+            InstallDotNet,
+            ShowLinuxCommands,
+            SwitchSelfContained,
+            Back,
+            Dismiss,
+        }
+
+        let snapshot = self.kawaii_runtime_state.clone();
+        let mut action = None;
+
+        match snapshot {
+            KawaiiRuntimeUiState::Hidden => return,
+            KawaiiRuntimeUiState::Choices { error } => {
+                let window_size = egui::vec2(
+                    (ctx.screen_rect().width() * 0.56).clamp(560.0, 760.0),
+                    440.0,
+                );
+                egui::Window::new("KawaiiPhysics needs .NET")
+                    .collapsible(false)
+                    .movable(false)
+                    .resizable(false)
+                    .fixed_size(window_size)
+                    .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    .frame(kawaii_runtime_window_frame(ctx))
+                    .show(ctx, |ui| {
+                        ui.heading("KawaiiPhysics could not start");
+                        ui.add_space(8.0);
+                        ui.add(Label::new("The normal repak-gui build uses your local .NET runtime for KawaiiPhysics porting. You can install .NET, view Linux package commands, or switch this app to the self-contained build.").wrap());
+                        ui.add_space(12.0);
+
+                        ui.horizontal_wrapped(|ui| {
+                            if ui
+                                .add_sized(
+                                    [220.0, 30.0],
+                                    Button::new("Install .NET on Windows"),
+                                )
+                                .clicked()
+                            {
+                                action = Some(KawaiiAction::InstallDotNet);
+                            }
+                            if ui
+                                .add_sized([200.0, 30.0], Button::new("Show Linux commands"))
+                                .clicked()
+                            {
+                                action = Some(KawaiiAction::ShowLinuxCommands);
+                            }
+                            if ui
+                                .add_sized(
+                                    [240.0, 30.0],
+                                    Button::new(
+                                        RichText::new("Switch to self-contained repak-gui")
+                                            .color(Color32::WHITE),
+                                    )
+                                    .fill(RED_THEME_COLOR),
+                                )
+                                .clicked()
+                            {
+                                action = Some(KawaiiAction::SwitchSelfContained);
+                            }
+                        });
+
+                        ui.add_space(12.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("Original error").strong());
+                        ScrollArea::vertical()
+                            .id_salt("kawaii_runtime_error")
+                            .max_height(130.0)
+                            .show(ui, |ui| {
+                                ui.monospace(error);
+                            });
+
+                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                            if ui.button("Close").clicked() {
+                                action = Some(KawaiiAction::Dismiss);
+                            }
+                        });
+                    });
+            }
+            KawaiiRuntimeUiState::LinuxCommands { error } => {
+                let window_size = egui::vec2(
+                    (ctx.screen_rect().width() * 0.58).clamp(580.0, 780.0),
+                    500.0,
+                );
+                egui::Window::new("Linux .NET runtime commands")
+                    .collapsible(false)
+                    .movable(false)
+                    .resizable(false)
+                    .fixed_size(window_size)
+                    .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    .frame(kawaii_runtime_window_frame(ctx))
+                    .show(ctx, |ui| {
+                        ui.heading("Install a .NET runtime");
+                        ui.add_space(8.0);
+                        ui.add(Label::new("Pick the command for your distro, then try KawaiiPhysics porting again.").wrap());
+                        ui.add_space(12.0);
+
+                        ui.label(RichText::new("Arch").strong());
+                        ui.monospace("sudo pacman -S dotnet-runtime dotnet-hostfxr");
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("Ubuntu").strong());
+                        ui.monospace("sudo apt update && sudo apt install dotnet-runtime-8.0");
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("Fedora").strong());
+                        ui.monospace("sudo dnf install dotnet-runtime-8.0");
+
+                        ui.add_space(12.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("Original error").strong());
+                        ScrollArea::vertical()
+                            .id_salt("kawaii_runtime_linux_error")
+                            .max_height(90.0)
+                            .show(ui, |ui| {
+                                ui.monospace(error);
+                            });
+
+                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                            if ui.button("Close").clicked() {
+                                action = Some(KawaiiAction::Dismiss);
+                            }
+                            if ui.button("Back").clicked() {
+                                action = Some(KawaiiAction::Back);
+                            }
+                        });
+                    });
+            }
+        }
+
+        match action {
+            Some(KawaiiAction::InstallDotNet) => {
+                if let Err(e) =
+                    open_url("https://dotnet.microsoft.com/download/dotnet/latest/runtime")
+                {
+                    warn!(error = %e, "Failed to open .NET runtime download page");
+                }
+            }
+            Some(KawaiiAction::ShowLinuxCommands) => {
+                if let KawaiiRuntimeUiState::Choices { error } = self.kawaii_runtime_state.clone() {
+                    self.kawaii_runtime_state = KawaiiRuntimeUiState::LinuxCommands { error };
+                }
+            }
+            Some(KawaiiAction::SwitchSelfContained) => {
+                self.kawaii_runtime_state = KawaiiRuntimeUiState::Hidden;
+                self.start_self_contained_switch();
+            }
+            Some(KawaiiAction::Back) => {
+                if let KawaiiRuntimeUiState::LinuxCommands { error } =
+                    self.kawaii_runtime_state.clone()
+                {
+                    self.kawaii_runtime_state = KawaiiRuntimeUiState::Choices { error };
+                }
+            }
+            Some(KawaiiAction::Dismiss) => {
+                self.kawaii_runtime_state = KawaiiRuntimeUiState::Hidden;
+            }
+            None => {}
+        }
+    }
+
     fn show_update_window(&mut self, ctx: &egui::Context) {
         enum UpdateAction {
             Start(crate::updater::AvailableUpdate),
@@ -1532,6 +1749,8 @@ impl RepakModManager {
                 egui::Window::new("Checking for updates")
                     .collapsible(false)
                     .resizable(false)
+                    .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    .frame(update_window_frame(ctx))
                     .show(ctx, |ui| {
                         ui.label("Checking GitHub for the latest repak-rivals release...");
                     });
@@ -1540,12 +1759,11 @@ impl RepakModManager {
                 let window_size = update_window_size(ctx);
                 egui::Window::new("Repak update available")
                     .collapsible(false)
-                    .resizable(true)
-                    .default_size(window_size)
-                    .min_width(760.0)
-                    .min_height(460.0)
+                    .resizable(false)
+                    .fixed_size(window_size)
+                    .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    .frame(update_window_frame(ctx))
                     .show(ctx, |ui| {
-                        ui.set_min_size(window_size);
                         let (left_width, right_width, scroll_height) = update_window_layout(ui);
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
@@ -1606,12 +1824,11 @@ impl RepakModManager {
                 let window_size = update_window_size(ctx);
                 egui::Window::new("Updating Repak")
                     .collapsible(false)
-                    .resizable(true)
-                    .default_size(window_size)
-                    .min_width(760.0)
-                    .min_height(460.0)
+                    .resizable(false)
+                    .fixed_size(window_size)
+                    .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    .frame(update_window_frame(ctx))
                     .show(ctx, |ui| {
-                        ui.set_min_size(window_size);
                         let (left_width, right_width, scroll_height) = update_window_layout(ui);
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
@@ -1647,12 +1864,11 @@ impl RepakModManager {
                 let window_size = update_window_size(ctx);
                 egui::Window::new("Update failed")
                     .collapsible(false)
-                    .resizable(true)
-                    .default_size(window_size)
-                    .min_width(760.0)
-                    .min_height(460.0)
+                    .resizable(false)
+                    .fixed_size(window_size)
+                    .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    .frame(update_window_frame(ctx))
                     .show(ctx, |ui| {
-                        ui.set_min_size(window_size);
                         let (left_width, right_width, scroll_height) = update_window_layout(ui);
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
@@ -1711,6 +1927,8 @@ impl RepakModManager {
                 egui::Window::new("Repak updater")
                     .collapsible(false)
                     .resizable(false)
+                    .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    .frame(update_window_frame(ctx))
                     .show(ctx, |ui| {
                         ui.label(message);
                         if ui.button("Close").clicked() {
@@ -2130,6 +2348,8 @@ impl eframe::App for RepakModManager {
         }
         self.process_update_messages(ctx);
         self.show_update_window(ctx);
+        self.process_kawaii_runtime_messages(ctx);
+        self.show_kawaii_runtime_window(ctx);
 
         if let Some(ref mut welcome) = self.welcome_screen {
             if !self.hide_welcome {
@@ -2255,16 +2475,52 @@ fn render_changelog(ui: &mut egui::Ui, changelog: &str) {
 fn update_window_size(ctx: &egui::Context) -> egui::Vec2 {
     let screen = ctx.screen_rect();
     egui::vec2(
-        (screen.width() * 0.74).clamp(760.0, 1040.0),
-        (screen.height() * 0.72).clamp(460.0, 680.0),
+        (screen.width() * 0.72).clamp(680.0, 980.0),
+        (screen.height() * 0.68).clamp(420.0, 620.0),
     )
 }
 
+fn update_window_frame(ctx: &egui::Context) -> egui::Frame {
+    egui::Frame::window(&ctx.style())
+        .fill(Color32::from_rgb(24, 24, 28))
+        .stroke(Stroke::new(1.0, Color32::from_rgb(82, 34, 44)))
+}
+
+fn kawaii_runtime_window_frame(ctx: &egui::Context) -> egui::Frame {
+    egui::Frame::window(&ctx.style())
+        .fill(Color32::from_rgba_unmultiplied(28, 28, 32, 255))
+        .stroke(Stroke::new(1.0, Color32::from_rgb(124, 44, 58)))
+}
+
 fn update_window_layout(ui: &egui::Ui) -> (f32, f32, f32) {
-    let left_width = 230.0;
-    let right_width = (ui.available_width() - left_width - 22.0).max(420.0);
-    let scroll_height = (ui.available_height() - 48.0).max(300.0);
+    let available_width = ui.available_width();
+    let left_width = (available_width * 0.32).clamp(220.0, 280.0);
+    let right_width = (available_width - left_width - 24.0).max(320.0);
+    let scroll_height = (ui.available_height() - 48.0).clamp(240.0, 520.0);
     (left_width, right_width, scroll_height)
+}
+
+fn open_url(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("cmd")
+        .args(["/C", "start", "", url])
+        .spawn();
+
+    #[cfg(target_os = "linux")]
+    let result = std::process::Command::new("xdg-open").arg(url).spawn();
+
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").arg(url).spawn();
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    let result = Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "opening URLs is not supported on this platform",
+    ));
+
+    result
+        .map(|_| ())
+        .map_err(|e| format!("Failed to open {url}: {e}"))
 }
 
 fn normalize_mod_display_name(name: &str) -> String {

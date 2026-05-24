@@ -8,10 +8,20 @@ use iotoc::{convert_directory_to_iostore, to_legacy_uasset_fast_with_progress};
 use pak_files::create_repak_from_pak;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
+use std::sync::{Mutex, OnceLock};
 use tracing::{error, info, instrument, warn};
 
 const MOD_NAME_SUFFIX: &str = "_9999999_P";
+static KAWAII_RUNTIME_ERROR_SENDER: OnceLock<Mutex<Option<Sender<String>>>> = OnceLock::new();
+
+pub fn register_kawaii_runtime_error_sender(sender: Sender<String>) {
+    let slot = KAWAII_RUNTIME_ERROR_SENDER.get_or_init(|| Mutex::new(None));
+    if let Ok(mut slot) = slot.lock() {
+        *slot = Some(sender);
+    }
+}
 
 pub(crate) fn ensure_mod_name_suffix(name: &str) -> String {
     if name.ends_with(MOD_NAME_SUFFIX) {
@@ -83,6 +93,16 @@ pub fn show_kawaii_error_dialog_if_relevant(error: &str) -> bool {
 
     if !looks_like_kawaii_runtime_error {
         return false;
+    }
+
+    if let Some(slot) = KAWAII_RUNTIME_ERROR_SENDER.get() {
+        if let Ok(slot) = slot.lock() {
+            if let Some(sender) = slot.as_ref() {
+                if sender.send(error.to_string()).is_ok() {
+                    return true;
+                }
+            }
+        }
     }
 
     rfd::MessageDialog::new()
@@ -309,6 +329,7 @@ pub fn install_mods_in_viewport(
                 installable_mod.kawaii_porter,
             );
             if let Err(e) = res {
+                show_kawaii_error_dialog_if_relevant(&e.to_string());
                 error!(
                     mod_name = %installable_mod.mod_name,
                     source_is_dir = installable_mod.mod_path.is_dir(),

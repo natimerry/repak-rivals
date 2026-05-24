@@ -1,5 +1,18 @@
 # Changelog
 
+## Version 3.3.0
+
+### Changes
+
+- Add an in-app `repak-gui` updater with release changelog display, staged install/restart, and a Settings menu action for manual update checks.
+- Add normal and self-contained release variants for `repak-gui` and `retoc-rivals-cli`, with self-contained artifacts bundling the KawaiiPhysics .NET helper for users without a local .NET runtime.
+- Add a cargo `xtask` release packager that builds self-contained artifacts per app and native CI target, while preventing Linux/Windows cross-target standalone builds.
+- Append runtime-variant guidance to GitHub release notes and publish self-contained artifacts alongside cargo-dist archives.
+- Improve KawaiiPhysics runtime failure handling in the GUI with a popup for installing .NET on Windows, viewing Linux package commands, or switching to self-contained `repak-gui`.
+- Improve updater and KawaiiPhysics dialogs with fixed dark window styling, clearer progress/error states, and non-blocking background checks.
+- Allow the KawaiiPhysics binding to roll forward to newer .NET runtimes and document the normal versus self-contained build behavior.
+- Improve CLI and GUI error output for KawaiiPhysics and Zen conversion failures by preserving full error context.
+
 ## Version 3.2.4
 
 ### Changes

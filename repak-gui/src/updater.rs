@@ -76,7 +76,7 @@ pub fn check_for_update(current_version: &str) -> Result<Option<AvailableUpdate>
         return Ok(None);
     }
 
-    let asset = choose_release_asset(&release.assets)
+    let asset = choose_release_asset(&release.assets, false)
         .ok_or_else(|| "No matching repak-gui .zip release asset was found".to_string())?;
     let changelog = fetch_release_changelog(
         &client,
@@ -94,6 +94,52 @@ pub fn check_for_update(current_version: &str) -> Result<Option<AvailableUpdate>
         asset_download_url: asset.browser_download_url.clone(),
         changelog,
     }))
+}
+
+pub fn check_for_self_contained_repak_gui(
+    current_version: &str,
+) -> Result<AvailableUpdate, String> {
+    let client = reqwest::blocking::Client::new();
+    let release_body = client
+        .get(LATEST_RELEASE_URL)
+        .header("User-Agent", USER_AGENT)
+        .send()
+        .map_err(|e| format!("Failed to query GitHub releases: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("GitHub release query failed: {e}"))?
+        .text()
+        .map_err(|e| format!("Failed to read GitHub release data: {e}"))?;
+    let release: GithubRelease = serde_json::from_str(&release_body)
+        .map_err(|e| format!("Failed to parse GitHub release data: {e}"))?;
+
+    let latest = release.tag_name.trim_start_matches('v');
+    let latest_version =
+        Version::parse(latest).map_err(|e| format!("Invalid latest version `{latest}`: {e}"))?;
+    let current_version = Version::parse(current_version)
+        .map_err(|e| format!("Invalid current version `{current_version}`: {e}"))?;
+
+    let asset = choose_release_asset(&release.assets, true).ok_or_else(|| {
+        "No matching self-contained repak-gui release asset was found for this platform".to_string()
+    })?;
+    let mut changelog = fetch_release_changelog(
+        &client,
+        &release.tag_name,
+        &current_version,
+        &latest_version,
+        release.body.as_deref(),
+    );
+    changelog = format!(
+        "## Self-contained repak-gui\n\nThis will replace the current repak-gui with the self-contained build for your platform. The bundled KawaiiPhysics helper does not need a locally installed .NET runtime.\n\n{changelog}"
+    );
+
+    Ok(AvailableUpdate {
+        current_version,
+        latest_version,
+        tag_name: release.tag_name,
+        asset_name: asset.name.clone(),
+        asset_download_url: asset.browser_download_url.clone(),
+        changelog,
+    })
 }
 
 pub fn download_and_prepare_update(
@@ -138,7 +184,7 @@ pub fn download_and_prepare_update(
     let extract_dir = stage_dir.join("extracted");
     fs::create_dir_all(&extract_dir)
         .map_err(|e| format!("Failed to create {}: {e}", extract_dir.display()))?;
-    extract_zip(&bytes, &extract_dir)?;
+    extract_release_asset(&update.asset_name, &bytes, &extract_dir)?;
 
     let staged_exe = find_staged_executable(&extract_dir, &current_exe)?;
     let source_dir = release_root_for_exe(&extract_dir, &staged_exe);
@@ -173,33 +219,28 @@ pub fn spawn_replace_and_restart(prepared: &PreparedUpdate) -> Result<(), String
     }
 }
 
-fn choose_release_asset(assets: &[GithubAsset]) -> Option<&GithubAsset> {
+fn choose_release_asset(assets: &[GithubAsset], self_contained: bool) -> Option<&GithubAsset> {
     assets
         .iter()
         .filter(|asset| {
             let name = asset.name.to_ascii_lowercase();
-            name.starts_with("repak-gui") && name.ends_with(".zip") && platform_matches(&name)
+            name.starts_with("repak-gui")
+                && platform_matches(&name)
+                && supported_archive(&name)
+                && name.contains("self-contained") == self_contained
         })
         .min_by_key(|asset| {
             let name = asset.name.to_ascii_lowercase();
-            (
-                name.contains("self-contained"),
-                !name.contains(std::env::consts::ARCH),
-                name.len(),
-            )
+            (!name.contains(std::env::consts::ARCH), name.len())
         })
-        .or_else(|| {
-            assets
-                .iter()
-                .filter(|asset| {
-                    let name = asset.name.to_ascii_lowercase();
-                    name.starts_with("repak-gui") && name.ends_with(".zip")
-                })
-                .min_by_key(|asset| {
-                    let name = asset.name.to_ascii_lowercase();
-                    (name.contains("self-contained"), name.len())
-                })
-        })
+}
+
+fn supported_archive(name: &str) -> bool {
+    if cfg!(target_os = "windows") {
+        name.ends_with(".zip")
+    } else {
+        name.ends_with(".tar.xz") || name.ends_with(".zip")
+    }
 }
 
 fn platform_matches(name: &str) -> bool {
@@ -396,6 +437,39 @@ fn extract_zip(bytes: &[u8], output_dir: &Path) -> Result<(), String> {
         }
     }
 
+    Ok(())
+}
+
+fn extract_release_asset(asset_name: &str, bytes: &[u8], output_dir: &Path) -> Result<(), String> {
+    let lower = asset_name.to_ascii_lowercase();
+    if lower.ends_with(".zip") {
+        extract_zip(bytes, output_dir)
+    } else if lower.ends_with(".tar.xz") {
+        extract_tar_xz(bytes, output_dir)
+    } else {
+        Err(format!("Unsupported release archive format: {asset_name}"))
+    }
+}
+
+fn extract_tar_xz(bytes: &[u8], output_dir: &Path) -> Result<(), String> {
+    let archive_path = output_dir.join("repak-gui-update.tar.xz");
+    fs::write(&archive_path, bytes)
+        .map_err(|e| format!("Failed to stage {}: {e}", archive_path.display()))?;
+
+    let status = Command::new("tar")
+        .arg("-xJf")
+        .arg(&archive_path)
+        .arg("-C")
+        .arg(output_dir)
+        .status()
+        .map_err(|e| format!("Failed to start tar: {e}"))?;
+    if !status.success() {
+        return Err(format!(
+            "tar failed while extracting {asset_name}",
+            asset_name = archive_path.display()
+        ));
+    }
+    let _ = fs::remove_file(archive_path);
     Ok(())
 }
 
