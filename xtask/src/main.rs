@@ -241,37 +241,55 @@ fn tar_xz_dir(dist_dir: &Path, package_name: &str) -> Result<PathBuf, Box<dyn st
 fn zip_dir(dist_dir: &Path, package_name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let archive = dist_dir.join(format!("{package_name}.zip"));
     let source = dist_dir.join(package_name);
+    let script_path = dist_dir.join(format!(".zip-{package_name}.ps1"));
     let script = r#"
-$source = $args[0]
-$dest = $args[1]
-$children = Get-ChildItem -LiteralPath $source
-if (Test-Path -LiteralPath $dest) {
-    Remove-Item -LiteralPath $dest -Force
+param(
+    [Parameter(Mandatory=$true)]
+    [string]$Source,
+
+    [Parameter(Mandatory=$true)]
+    [string]$Destination
+)
+
+$children = Get-ChildItem -LiteralPath $Source -Force
+if (Test-Path -LiteralPath $Destination) {
+    Remove-Item -LiteralPath $Destination -Force
 }
-Compress-Archive -LiteralPath $children.FullName -DestinationPath $dest -Force
+Compress-Archive -LiteralPath $children.FullName -DestinationPath $Destination -Force
 "#;
+
+    fs::write(&script_path, script)?;
 
     if command_exists("powershell") {
         let mut command = Command::new("powershell");
         command
             .arg("-NoLogo")
             .arg("-NoProfile")
-            .arg("-Command")
-            .arg(script)
-            .arg(source)
+            .arg("-File")
+            .arg(&script_path)
+            .arg("-Source")
+            .arg(&source)
+            .arg("-Destination")
             .arg(&archive);
-        run_command(command)?;
+        let result = run_command(command);
+        let _ = fs::remove_file(&script_path);
+        result?;
     } else if command_exists("pwsh") {
         let mut command = Command::new("pwsh");
         command
             .arg("-NoLogo")
             .arg("-NoProfile")
-            .arg("-Command")
-            .arg(script)
-            .arg(source)
+            .arg("-File")
+            .arg(&script_path)
+            .arg("-Source")
+            .arg(&source)
+            .arg("-Destination")
             .arg(&archive);
-        run_command(command)?;
+        let result = run_command(command);
+        let _ = fs::remove_file(&script_path);
+        result?;
     } else {
+        let _ = fs::remove_file(&script_path);
         return Err(
             "Windows self-contained artifacts require powershell or pwsh to create the zip".into(),
         );
