@@ -72,6 +72,33 @@ fn copy_fixed_iostore_files(
     Ok(())
 }
 
+pub fn show_kawaii_error_dialog_if_relevant(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    let looks_like_kawaii_runtime_error = lower.contains("kawaii")
+        && (lower.contains(".net")
+            || lower.contains("dotnet")
+            || lower.contains("hostfxr")
+            || lower.contains("managed dll binding")
+            || lower.contains("runtime"));
+
+    if !looks_like_kawaii_runtime_error {
+        return false;
+    }
+
+    rfd::MessageDialog::new()
+        .set_buttons(rfd::MessageButtons::Ok)
+        .set_level(rfd::MessageLevel::Error)
+        .set_title("KawaiiPhysics needs .NET")
+        .set_description(format!(
+            "KawaiiPhysics could not start.\n\n{}\n\nOriginal error:\n{}",
+            retoc::kawaii_physics_dependency_message(),
+            error
+        ))
+        .show();
+
+    true
+}
+
 fn repack_iostore_via_fast_extract(
     installable_mod: &InstallableMod,
     output_mod_dir: &Path,
@@ -203,6 +230,7 @@ pub fn install_mods_in_viewport(
                     kawaii_physics_usmap,
                     installable_mod.kawaii_porter,
                 ) {
+                    show_kawaii_error_dialog_if_relevant(&e.to_string());
                     error!(mod_name = %installable_mod.mod_name, error = %e, "Failed to repack IoStore mod");
                 }
                 continue;
@@ -245,6 +273,7 @@ pub fn install_mods_in_viewport(
                 kawaii_physics_usmap,
                 installable_mod.kawaii_porter,
             ) {
+                show_kawaii_error_dialog_if_relevant(&e.to_string());
                 error!(mod_name = %installable_mod.mod_name, error = %e, "Failed to create repak from pak");
             }
             continue;

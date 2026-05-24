@@ -18,8 +18,10 @@ use eframe::egui::{
     ScrollArea, Stroke, Style, TextEdit, TextStyle, Theme,
 };
 use egui_flex::{item, Flex, FlexAlign};
-use install_mod::install_mod_logic::fix_installed_iostore_kawaii_physics;
 use install_mod::install_mod_logic::pak_files::extract_pak_to_dir;
+use install_mod::install_mod_logic::{
+    fix_installed_iostore_kawaii_physics, show_kawaii_error_dialog_if_relevant,
+};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use path_clean::PathClean;
 use repak::PakReader;
@@ -1109,6 +1111,7 @@ impl RepakModManager {
                 crate::free_console();
 
                 if let Err(e) = result {
+                    show_kawaii_error_dialog_if_relevant(&e.to_string());
                     error!(error = %e, "Failed to fix installed IoStore KawaiiPhysics");
                 }
             }

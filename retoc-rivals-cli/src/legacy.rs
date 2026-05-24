@@ -98,7 +98,7 @@ fn fix_kawaii_physics_directory(input: &Path, usmap_arg: Option<&Path>) -> Resul
     tracing::info!(input = %input.display(), usmap = %usmap.display(), "Porting KawaiiPhysics assets in-place");
     println!("Fixing KawaiiPhysics assets in {}", input.display());
     let ported = retoc::port_kawaii_physics_directory(input, &usmap, true)
-        .map_err(|e| format!("KawaiiPhysics directory fix failed: {e}"))?;
+        .map_err(|e| format!("KawaiiPhysics directory fix failed: {e:#}"))?;
     println!("Ported {ported} KawaiiPhysics anim nodes");
     Ok(())
 }

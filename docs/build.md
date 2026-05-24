@@ -67,9 +67,14 @@ running binary under `KawaiiPhysicsBinding/`, loads .NET through `hostfxr`, and
 calls the managed `PortAsset` export directly. This avoids spawning a helper
 process for every asset.
 
-By default the binding is framework-dependent and requires a local .NET 8
-runtime. Set `RETOC_KAWAII_BINDING_SELF_CONTAINED=true` when building if the
-binding artifacts should include the .NET runtime files.
+By default the binding is framework-dependent and requires a local .NET
+runtime. The runtime config allows major-version roll-forward, so newer .NET
+runtimes can satisfy the binding.
+
+Set `RETOC_KAWAII_BINDING_SELF_CONTAINED=true` when building release artifacts
+if the binding should publish as a self-contained helper process. This variant
+is larger and slower during KawaiiPhysics porting, but it does not require the
+user to install .NET separately.
 
 ## Workspace Notes
 

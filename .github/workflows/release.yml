@@ -162,12 +162,46 @@ jobs:
         # inconsistent syntax between shell and powershell.
         shell: bash
         run: |
-          # Parse out what we just built and upload it to scratch storage
-          echo "paths<<EOF" >> "$GITHUB_OUTPUT"
-          dist print-upload-files-from-manifest --manifest dist-manifest.json >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          mkdir -p target/upload-artifacts
+
+          # Parse out what we just built, copy it aside, and upload it to scratch storage.
+          # The self-contained build below reuses cargo-dist and may overwrite target/distrib.
+          mapfile -t normal_paths < <(dist print-upload-files-from-manifest --manifest dist-manifest.json)
+          for path in "${normal_paths[@]}"; do
+            if [ -f "$path" ]; then
+              cp "$path" "target/upload-artifacts/$(basename "$path")"
+            fi
+          done
 
           cp dist-manifest.json "$BUILD_MANIFEST_NAME"
+
+          if [ "${{ needs.plan.outputs.publishing }}" = "true" ]; then
+            RETOC_KAWAII_BINDING_SELF_CONTAINED=true \
+              dist build ${{ needs.plan.outputs.tag-flag }} --print=linkage --output-format=json ${{ matrix.dist_args }} > dist-manifest-self-contained.json
+            echo "self-contained dist build ran successfully"
+
+            mapfile -t self_contained_paths < <(dist print-upload-files-from-manifest --manifest dist-manifest-self-contained.json)
+            for path in "${self_contained_paths[@]}"; do
+              if [ ! -f "$path" ]; then
+                continue
+              fi
+
+              base="$(basename "$path")"
+              case "$base" in
+                *.tar.xz) out="${base%.tar.xz}-self-contained.tar.xz" ;;
+                *.tar.gz) out="${base%.tar.gz}-self-contained.tar.gz" ;;
+                *.zip) out="${base%.zip}-self-contained.zip" ;;
+                *.msi) out="${base%.msi}-self-contained.msi" ;;
+                *) out="${base}-self-contained" ;;
+              esac
+
+              cp "$path" "target/upload-artifacts/$out"
+            done
+          fi
+
+          echo "paths<<EOF" >> "$GITHUB_OUTPUT"
+          find target/upload-artifacts -maxdepth 1 -type f | sort >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
       - name: "Upload artifacts"
         uses: actions/upload-artifact@v6
         with:
@@ -286,6 +320,8 @@ jobs:
         run: |
           # Write and read notes from a file to avoid quoting breaking things
           echo "$ANNOUNCEMENT_BODY" > $RUNNER_TEMP/notes.txt
+          printf "\n\n" >> $RUNNER_TEMP/notes.txt
+          cat .github/release-notes-runtime.md >> $RUNNER_TEMP/notes.txt
 
           gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
 

@@ -332,7 +332,7 @@ pub fn convert_directory_to_iostore(
     }));
     action_to_zen(action, config).map_err(|e| {
         repak::Error::Io(std::io::Error::other(format!(
-            "Failed to convert to Zen: {e}"
+            "Failed to convert to Zen: {e:#}"
         )))
     })?;
 

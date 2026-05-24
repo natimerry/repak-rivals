@@ -458,7 +458,7 @@ fn pack_raw_dir(
     config.port_kawaii_physics = args.kawaii_physics;
     config.kawaii_physics_usmap = args.kawaii_physics_usmap.clone();
     config.kawaii_physics_force_rebuild = true;
-    action_to_zen(action, Arc::new(config)).map_err(|e| format!("Pack failed: {e}"))?;
+    action_to_zen(action, Arc::new(config)).map_err(|e| format!("Pack failed: {e:#}"))?;
 
     write_chunknames_pak(
         input,
