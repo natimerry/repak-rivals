@@ -18,7 +18,8 @@ pr-run-mode = "upload"
 # Path that installers should place binaries in
 install-path = "CARGO_HOME"
 # Whether to install an updater program
-install-updater = true
+install-updater = false
 # Whether to install an updater program
 
 github-build-setup = "../dist-build-setup.yml"
+
