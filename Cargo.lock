@@ -3276,7 +3276,7 @@ checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
 name = "oodle_loader"
-version = "3.3.1"
+version = "3.3.2"
 dependencies = [
  "hex",
  "libloading 0.8.6",
@@ -3844,7 +3844,7 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "repak"
-version = "3.3.1"
+version = "3.3.2"
 dependencies = [
  "aes",
  "base64 0.22.1",
@@ -3863,7 +3863,7 @@ dependencies = [
 
 [[package]]
 name = "repak-gui"
-version = "3.3.1"
+version = "3.3.2"
 dependencies = [
  "colored",
  "dirs",
@@ -3993,7 +3993,7 @@ dependencies = [
 
 [[package]]
 name = "retoc-rivals-cli"
-version = "3.3.1"
+version = "3.3.2"
 dependencies = [
  "clap",
  "dirs",
@@ -4414,7 +4414,7 @@ checksum = "d66dc143e6b11c1eddc06d5c423cfc97062865baf299914ab64caa38182078fe"
 
 [[package]]
 name = "simd_str_cmp"
-version = "3.3.1"
+version = "3.3.2"
 dependencies = [
  "criterion",
  "once_cell",
