@@ -294,7 +294,7 @@ jobs:
       - name: Cleanup
         run: |
           # Remove the granular manifests
-          rm -f artifacts/*-dist-manifest.json
+          find artifacts -type f -name '*-dist-manifest.json' -delete
       - name: Create GitHub Release
         env:
           PRERELEASE_FLAG: "${{ fromJson(steps.host.outputs.manifest).announcement_is_prerelease && '--prerelease' || '' }}"
@@ -307,7 +307,11 @@ jobs:
           printf "\n\n" >> $RUNNER_TEMP/notes.txt
           cat .github/release-notes-runtime.md >> $RUNNER_TEMP/notes.txt
 
-          gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
+          mapfile -t release_assets < <(find artifacts -type f | sort)
+          printf 'release assets:\n'
+          printf '  %s\n' "${release_assets[@]}"
+
+          gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" "${release_assets[@]}"
 
   announce:
     needs:
