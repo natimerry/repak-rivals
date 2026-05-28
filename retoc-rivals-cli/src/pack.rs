@@ -58,6 +58,7 @@ pub fn pack_dir(aes_key: retoc::AesKey, args: PackDirArgs) -> Result<(), String>
     let mut pack_args = PackArgs {
         input: Vec::new(),
         output: args.output.clone(),
+        separate_output_dirs: args.separate_output_dirs,
         mount_point: args.mount_point,
         path_hash_seed: args.path_hash_seed,
         no_mod_suffix: args.no_mod_suffix,
@@ -315,13 +316,14 @@ fn pack_iostore_packages(
         return Ok(());
     }
 
-    let output_dir = args
+    let base_output_dir = args
         .output
         .clone()
         .unwrap_or_else(|| default_output.to_path_buf());
 
-    if !args.kawaii_physics {
+    if !should_repack_iostore(args) {
         for package in packages {
+            let output_dir = output_dir_for(args, default_output, &package.stem());
             let output =
                 iostore_ops::copy_iostore_package(package, &output_dir, args.no_mod_suffix)?;
             println!("Installed IoStore package to {}", output.display());
@@ -330,7 +332,7 @@ fn pack_iostore_packages(
     }
 
     let game_paks_dir = game_paks_dir.ok_or_else(|| {
-        "Game Paks directory is required when repacking IoStore mods with --kawaii-physics. Pass --game-paks-dir or open repak-gui once so its saved config can be used.".to_string()
+        "Game Paks directory is required when repacking IoStore mods with --obfuscate, non-default --compression, or --kawaii-physics. Pass --game-paks-dir or open repak-gui once so its saved config can be used.".to_string()
     })?;
     let temp = tempfile::tempdir().map_err(|e| format!("Failed to create temp dir: {e}"))?;
     let outputs = packages
@@ -353,7 +355,7 @@ fn pack_iostore_packages(
             args,
             &extracted.output,
             &package.stem(),
-            &output_dir,
+            &base_output_dir,
         )?;
     }
     Ok(())
@@ -366,19 +368,15 @@ fn pack_iostore_package(
     default_output: &Path,
     game_paks_dir: Option<&Path>,
 ) -> Result<(), String> {
-    let output_dir = args
-        .output
-        .clone()
-        .unwrap_or_else(|| default_output.to_path_buf());
-
-    if !args.kawaii_physics {
+    if !should_repack_iostore(args) {
+        let output_dir = output_dir_for(args, default_output, &package.stem());
         let output = iostore_ops::copy_iostore_package(package, &output_dir, args.no_mod_suffix)?;
         println!("Installed IoStore package to {}", output.display());
         return Ok(());
     }
 
     let game_paks_dir = game_paks_dir.ok_or_else(|| {
-        "Game Paks directory is required when repacking IoStore mods with --kawaii-physics. Pass --game-paks-dir or open repak-gui once so its saved config can be used.".to_string()
+        "Game Paks directory is required when repacking IoStore mods with --obfuscate, non-default --compression, or --kawaii-physics. Pass --game-paks-dir or open repak-gui once so its saved config can be used.".to_string()
     })?;
 
     let temp = tempfile::tempdir().map_err(|e| format!("Failed to create temp dir: {e}"))?;
@@ -392,7 +390,13 @@ fn pack_iostore_package(
         args.full_iostore_check,
         true,
     )?;
-    pack_raw_dir(aes_key, args, &extracted_dir, &package.stem(), &output_dir)
+    pack_raw_dir(
+        aes_key,
+        args,
+        &extracted_dir,
+        &package.stem(),
+        default_output,
+    )
 }
 
 fn repack_legacy_pak(
@@ -423,10 +427,7 @@ fn pack_raw_dir(
         return Err(format!("Input is not a directory: {}", input.display()));
     }
 
-    let output_dir = args
-        .output
-        .clone()
-        .unwrap_or_else(|| default_output.to_path_buf());
+    let output_dir = output_dir_for(args, default_output, raw_name);
     fs::create_dir_all(&output_dir)
         .map_err(|e| format!("Failed to create {}: {e}", output_dir.display()))?;
 
@@ -517,6 +518,22 @@ fn input_stem(path: &Path) -> String {
         .and_then(|stem| stem.to_str())
         .unwrap_or("mod")
         .to_string()
+}
+
+fn should_repack_iostore(args: &PackArgs) -> bool {
+    args.kawaii_physics || args.obfuscate || args.compression != crate::cli::CompressionArg::Oodle
+}
+
+fn output_dir_for(args: &PackArgs, default_output: &Path, item_name: &str) -> PathBuf {
+    let base = args
+        .output
+        .clone()
+        .unwrap_or_else(|| default_output.to_path_buf());
+    if args.separate_output_dirs {
+        base.join(item_name)
+    } else {
+        base
+    }
 }
 
 fn scan_raw_mod_dirs(root: &Path) -> Vec<PathBuf> {

@@ -138,6 +138,7 @@ Raw folder to IoStore:
 ```console
 retoc-rivals-cli pack path\to\MyModFolder
 retoc-rivals-cli pack path\to\MyModFolder --output "C:\Path\To\~mods"
+retoc-rivals-cli pack path\to\MyModFolder --output fixed_mods --separate-output-dirs
 ```
 
 Legacy pak/archive to IoStore:
@@ -151,6 +152,12 @@ Existing IoStore triple install/copy:
 
 ```console
 retoc-rivals-cli pack ExistingMod_9999999_P.utoc --output "C:\Path\To\~mods"
+```
+
+Repack an existing IoStore triple with obfuscation:
+
+```console
+retoc-rivals-cli pack ExistingMod_9999999_P.utoc --output fixed_mods --game-paks-dir "C:\Path\To\Paks" --full-iostore-check --obfuscate
 ```
 
 KawaiiPhysics:
@@ -180,6 +187,7 @@ retoc-rivals-cli pack path\to\MyModFolder --compression none
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `-o, --output <DIR>` | input parent | output directory |
+| `--separate-output-dirs` | off | write each packed mod under `--output\<input-name>` |
 | `--mount-point <MOUNT>` | `../../../` | generated fake pak mount point |
 | `--path-hash-seed <SEED>` | `00000000` | generated fake pak path hash seed |
 | `--no-mod-suffix` | off | do not append `_9999999_P` |
@@ -187,7 +195,7 @@ retoc-rivals-cli pack path\to\MyModFolder --compression none
 | `--compression <METHOD>` | `oodle` | `none`, `zlib`, `zstd`, `lz4`, `oodle` |
 | `--kawaii-physics` | off | port assets while converting |
 | `--kawaii-physics-usmap <PATH>` | saved GUI config, then auto-download | mapping file |
-| `--game-paks-dir <DIR>` | saved GUI config if available | deps for repacking IoStore with KawaiiPhysics |
+| `--game-paks-dir <DIR>` | saved GUI config if available | deps for repacking IoStore with KawaiiPhysics, obfuscation, or non-default compression |
 | `--full-iostore-check` | off | slow all-container dependency path |
 
 Output rules:
@@ -197,7 +205,9 @@ Output rules:
 | suffix | appends `_9999999_P` unless `--no-mod-suffix` |
 | generated files | `.pak`, `.utoc`, `.ucas` |
 | generated `.pak` | fake pak containing `chunknames` |
-| IoStore input without `--kawaii-physics` | copied/installed, not converted |
+| IoStore input without transform flags | copied/installed, not converted |
+| IoStore input with `--obfuscate` | to-legacy temp extraction, re-pack with obfuscated IoStore |
+| IoStore input with non-default `--compression` | to-legacy temp extraction, re-pack with selected compression |
 | IoStore input with `--kawaii-physics` | to-legacy temp extraction, Kawaii port, re-pack |
 
 `pack <dir>` treats a raw asset directory as one mod. Use `pack-dir` for a drop folder that contains a mix of raw mod folders, loose IoStore triples, legacy paks, and archives.
@@ -208,17 +218,19 @@ Use `pack-dir` for a mixed download folder.
 
 ```console
 retoc-rivals-cli pack-dir "C:\Downloads\Rivals Mods" --output "C:\Path\To\~mods"
+retoc-rivals-cli pack-dir "C:\Downloads\Rivals Mods" --output fixed_mods --separate-output-dirs
 retoc-rivals-cli pack-dir "C:\Downloads\Rivals Mods" --output fixed_mods --kawaii-physics
 retoc-rivals-cli pack-dir "C:\Users\soham\Desktop\mods\WhitePimpStuff" --output "C:\Users\soham\Desktop\whitepfixed" --kawaii-physics --game-paks-dir "D:\SteamLibrary\steamapps\common\MarvelRivals\MarvelGame\Marvel\Content\Paks" --kawaii-physics-usmap mappings.usmap
 ```
 
-`pack-dir` discovers direct raw cooked mod folders, recursive IoStore triples, legacy paks, and `.7z`/`.zip`/`.rar` archives. It logs tree scanning and archive extraction. When KawaiiPhysics is enabled for IoStore inputs, it batches to-legacy extraction so game containers are opened once for the input set instead of once per archive.
+`pack-dir` discovers direct raw cooked mod folders, recursive IoStore triples, legacy paks, and `.7z`/`.zip`/`.rar` archives. It logs tree scanning and archive extraction. When IoStore inputs need repacking (`--obfuscate`, non-default `--compression`, or `--kawaii-physics`), it batches to-legacy extraction so game containers are opened once for the input set instead of once per archive.
 
 `pack-dir` supports `--kawaii-physics` because it is meant to produce fixed package outputs for every discovered mod. For in-place asset-only patching, unpack one mod to a raw directory first, then use `fix-kawaii-physics <dir>`.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `-o, --output <DIR>` | input parent | output directory for every packed mod |
+| `--separate-output-dirs` | off | write each packed mod under `--output\<mod-name>` |
 | `--mount-point <MOUNT>` | `../../../` | generated fake pak mount point |
 | `--path-hash-seed <SEED>` | `00000000` | generated fake pak path hash seed |
 | `--no-mod-suffix` | off | do not append `_9999999_P` |
@@ -226,7 +238,7 @@ retoc-rivals-cli pack-dir "C:\Users\soham\Desktop\mods\WhitePimpStuff" --output 
 | `--compression <METHOD>` | `oodle` | `none`, `zlib`, `zstd`, `lz4`, `oodle` |
 | `--kawaii-physics` | off | port assets while converting |
 | `--kawaii-physics-usmap <PATH>` | saved GUI config, then auto-download | mapping file |
-| `--game-paks-dir <DIR>` | saved GUI config if available | deps for repacking IoStore with KawaiiPhysics |
+| `--game-paks-dir <DIR>` | saved GUI config if available | deps for repacking IoStore with KawaiiPhysics, obfuscation, or non-default compression |
 | `--full-iostore-check` | off | open all game IoStore containers |
 
 ## `fix-kawaii-physics`

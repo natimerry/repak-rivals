@@ -41,6 +41,8 @@ retoc-rivals-cli unpack Example.utoc --game-paks-dir "C:\Path\To\Paks" --full-io
 
 Fast path opens selected mod containers plus likely dependencies. Full check opens all game `.utoc` files and is slower.
 
+`pack` and `pack-dir` also need game containers when an existing IoStore triple must be transformed with `--obfuscate`, non-default `--compression`, or `--kawaii-physics`. Without those transform flags, IoStore triples are copied as-is.
+
 ## Output Naming
 
 | Symptom | Fix |
@@ -48,12 +50,13 @@ Fast path opens selected mod containers plus likely dependencies. Full check ope
 | missing `_9999999_P` | repack without `--no-mod-suffix` |
 | duplicate suffix | leave default behavior; tool detects existing suffix |
 | existing IoStore copied with old name | pass `--no-mod-suffix` only when intentionally preserving source name |
+| want each mod in its own output folder | add `--separate-output-dirs` to `pack` or `pack-dir` |
 
 ## Archive Payloads
 
 `.7z`, `.zip`, and `.rar` archives are extracted to temp and scanned. If an archive contains multiple mods, GUI may create multiple install rows and CLI may perform multiple package operations.
 
-For a mixed folder containing loose IoStore triples, legacy paks, raw mod folders, and archives, use `retoc-rivals-cli pack-dir`. It scans the folder first, logs each archive extraction, and batches IoStore KawaiiPhysics extraction so game containers are opened once for the input set instead of once per archive.
+For a mixed folder containing loose IoStore triples, legacy paks, raw mod folders, and archives, use `retoc-rivals-cli pack-dir`. It scans the folder first, logs each archive extraction, and batches IoStore extraction for transform flows so game containers are opened once for the input set instead of once per archive.
 
 ## Legacy Pak vs IoStore
 

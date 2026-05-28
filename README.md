@@ -68,7 +68,9 @@ retoc-rivals-cli unpack ExampleMod_9999999_P.utoc --output unpacked
 retoc-rivals-cli unpack-dir "C:\Downloads\Rivals Mods"
 retoc-rivals-cli pack unpacked --output "C:\Path\To\~mods" --compression oodle
 retoc-rivals-cli pack-dir "C:\Downloads\Rivals Mods" --output "C:\Path\To\~mods"
+retoc-rivals-cli pack-dir "C:\Downloads\Rivals Mods" --output fixed_mods --separate-output-dirs
 retoc-rivals-cli pack-dir "C:\Downloads\Rivals Mods" --output fixed_mods --kawaii-physics
+retoc-rivals-cli pack ExistingMod_9999999_P.utoc --output fixed_mods --game-paks-dir "C:\Path\To\Paks" --obfuscate
 retoc-rivals-cli fix-kawaii-physics unpacked
 retoc-rivals-cli fix-kawaii-physics --output fixed-mods
 ```

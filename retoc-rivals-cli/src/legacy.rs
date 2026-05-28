@@ -64,6 +64,7 @@ pub fn fix_kawaii_physics(
             PackArgs {
                 input: vec![extracted_dir.clone()],
                 output: Some(args.output.clone()),
+                separate_output_dirs: false,
                 mount_point: "../../../".to_string(),
                 path_hash_seed: "00000000".to_string(),
                 no_mod_suffix: false,

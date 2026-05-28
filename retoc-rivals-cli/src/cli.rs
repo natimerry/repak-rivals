@@ -102,6 +102,10 @@ pub struct PackArgs {
     #[arg(short, long)]
     pub output: Option<PathBuf>,
 
+    /// Put each packed mod into a separate child directory below --output.
+    #[arg(long, alias = "per-mod-output-dir")]
+    pub separate_output_dirs: bool,
+
     /// Mount point to write into the generated fake .pak.
     #[arg(long, default_value = "../../../")]
     pub mount_point: String,
@@ -148,6 +152,10 @@ pub struct PackDirArgs {
     #[arg(short, long)]
     pub output: Option<PathBuf>,
 
+    /// Put each packed mod into a separate child directory below --output.
+    #[arg(long, alias = "per-mod-output-dir")]
+    pub separate_output_dirs: bool,
+
     /// Mount point to write into generated fake .pak files.
     #[arg(long, default_value = "../../../")]
     pub mount_point: String,
@@ -185,7 +193,7 @@ pub struct PackDirArgs {
     pub full_iostore_check: bool,
 }
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum CompressionArg {
     None,
     Zlib,
