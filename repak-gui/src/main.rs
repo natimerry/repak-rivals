@@ -507,11 +507,11 @@ fn main() {
         custom_panic(info.into());
     }));
 
-    let exe_path = std::env::current_exe().expect("Failed to get executable path");
-    let log_path = exe_path
-        .parent()
-        .expect("Failed to get executable directory")
-        .join("latest.log");
+    let log_dir = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("repak_manager");
+    std::fs::create_dir_all(&log_dir).ok();
+    let log_path = log_dir.join("latest.log");
     let _log_guard = init_tracing(&log_path);
 
     info!(

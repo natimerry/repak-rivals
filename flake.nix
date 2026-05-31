@@ -10,11 +10,11 @@
     };
 
     retoc-rivals = {
-      url = "github:natimerry/retoc-rivals/c5b00c2";
+      url = "github:natimerry/retoc-rivals/00a9468510902bfb078393718e484d6c5a66a1af";
       flake = false;
     };
     uasset-mesh-patch-rivals = {
-      url = "github:natimerry/uasset-mesh-patch-rivals/a9e9f33";
+      url = "github:natimerry/uasset-mesh-patch-rivals/93f78118b661dde469f41361a2ebf004eb4f4ca2";
       flake = false;
     };
   };
@@ -34,7 +34,21 @@
         fenix.overlays.default
       ];
 
+      packages.uasset-api = {pkgs, ...}: pkgs.buildDotnetModule rec {
+        name = "UAssetAPI-Kawaii";
+        version = "95b4053";
+        src = pkgs.fetchFromGitHub {
+          owner = "natimerry";
+          repo = "UAssetAPI-Kawaii";
+          rev = version;
+          hash = "sha256-tee/HD2mPiCOfpLbbbFG6lo6tGfOSVXJVr1o0fWLxQY=";
+        };
+        dotnet-sdk = pkgs.dotnet-sdk_8;
+        nugetDeps = ./nix/deps.json;
+      };
+
       packages.default = {pkgs, ...}: let
+        UAssetAPI = self.packages.${pkgs.system}.uasset-api;
         craneLib = (crane.mkLib pkgs).overrideToolchain (
           p:
             p.fenix.complete.withComponents [
@@ -60,6 +74,7 @@
           inherit src;
           pname = "repak-rivals";
           doCheck = false;
+          NIX_UASSET_API_PATH = UAssetAPI;
         };
       in
         craneLib.buildPackage {
@@ -72,7 +87,10 @@
             makeWrapper
           ];
 
-          buildInputs = [pkgs.stdenv.cc.cc.lib];
+          buildInputs = [pkgs.stdenv.cc.cc.lib UAssetAPI];
+
+          NIX_UASSET_API_PATH = UAssetAPI;
+          patches = [ ./nix/retoc-build.patch ];
 
           # banger postInstall right here
           postInstall = ''
@@ -90,21 +108,37 @@
                   libGL
                 ]
             }
+
           '';
         };
       apps.default = packages: {
         type = "app";
         program = "${packages.default}/bin/repak-gui";
       };
-      devShell.packages = {pkgs, ...}: [
-        (pkgs.fenix.complete.withComponents [
-          "cargo"
-          "clippy"
-          "rust-src"
-          "rustc"
-          "rustfmt"
-          "rust-analyzer"
-        ])
-      ];
+      devShell = {pkgs, ...}: {
+        inputsFrom = [ self.packages.${pkgs.system}.default ];
+        packages = [
+          (pkgs.fenix.complete.withComponents [
+            "cargo"
+            "clippy"
+            "rust-src"
+            "rustc"
+            "rustfmt"
+            "rust-analyzer"
+          ])
+          pkgs.dotnet-sdk_8
+        ];
+        env = {
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (with pkgs; [
+            stdenv.cc.cc.lib
+            libX11
+            libXcursor
+            libxi
+            libxkbcommon
+            mesa
+            libGL
+          ]);
+        };
+      };
     };
 }

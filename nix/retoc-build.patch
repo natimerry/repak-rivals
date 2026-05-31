@@ -1,0 +1,69 @@
+diff --git a/retoc-rivals/build.rs b/retoc-rivals/build.rs
+index 95c4d0d..7122789 100644
+--- a/retoc-rivals/build.rs
++++ b/retoc-rivals/build.rs
+@@ -17,6 +17,35 @@ fn main() {
+     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR was not set"));
+     let embed_rs = out_dir.join(EMBED_RS_NAME);
+ 
++    if let Some(nix_path) = env::var_os("NIX_UASSET_API_PATH") {
++        let build_root = out_dir.join("kawaii_physics_binding");
++        let publish_dir = build_root.join("publish");
++        if publish_dir.exists() {
++            std::fs::remove_dir_all(&publish_dir)
++                .expect("failed to clean KawaiiPhysicsBinding publish dir");
++        }
++        std::fs::create_dir_all(&publish_dir)
++            .expect("failed to create KawaiiPhysicsBinding publish dir");
++
++        copy_nix_uasset_api_files(Path::new(&nix_path), &publish_dir);
++
++        let target_os = env::var("CARGO_CFG_TARGET_OS").expect("missing CARGO_CFG_TARGET_OS");
++        let binding_executable_name = binding_executable_name(&target_os);
++
++        let publish_files = collect_publish_files(&publish_dir);
++        let binding_stamp = binding_stamp(&publish_dir, &publish_files);
++
++        write_embed_file(
++            &embed_rs,
++            &publish_dir,
++            &publish_files,
++            &binding_stamp,
++            false,
++            binding_executable_name,
++        );
++        return;
++    }
++
+     if env::var_os("RETOC_SKIP_KAWAII_BINDING_BUILD").is_some() {
+         write_empty_embed_file(&embed_rs);
+         println!(
+@@ -469,3 +498,28 @@ pub static KAWAII_BINDING_FILES: &[(&str, &[u8])] = &[];
+         )
+     });
+ }
++
++fn copy_nix_uasset_api_files(nix_path: &Path, publish_dir: &Path) {
++    fn scan_and_copy(src: &Path, dest: &Path) -> std::io::Result<()> {
++        if src.is_dir() {
++            for entry in std::fs::read_dir(src)? {
++                let entry = entry?;
++                let path = entry.path();
++                let file_name = path.file_name().unwrap();
++                if path.is_dir() {
++                    scan_and_copy(&path, dest)?;
++                } else if path.is_file() {
++                    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
++                    if ext == "dll" || ext == "json" || ext == "exe" || path.file_name().unwrap() == "KawaiiPhysicsBinding" {
++                        std::fs::copy(&path, dest.join(file_name))?;
++                    }
++                }
++            }
++        }
++        Ok(())
++    }
++
++    if let Err(err) = scan_and_copy(nix_path, publish_dir) {
++        panic!("failed to copy precompiled UAssetAPI files from {}: {err}", nix_path.display());
++    }
++}
