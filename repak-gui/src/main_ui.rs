@@ -20,7 +20,8 @@ use eframe::egui::{
 use egui_flex::{item, Flex, FlexAlign};
 use install_mod::install_mod_logic::pak_files::extract_pak_to_dir;
 use install_mod::install_mod_logic::{
-    fix_installed_iostore_kawaii_physics, register_kawaii_runtime_error_sender,
+    fix_installed_iostore_kawaii_physics, patch_installed_iostore_default_hidden_materials,
+    register_kawaii_runtime_error_sender,
 };
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use path_clean::PathClean;
@@ -42,7 +43,32 @@ use walkdir::WalkDir;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 const RED_THEME_COLOR: Color32 = Color32::from_rgb(255, 31, 75);
+const DEFAULT_HIDDEN_MATERIAL_BITMAPS: [u64; 3] = [0x0FFF0000, 0x0FFF0000, 0x0EFB0000];
 // use eframe::egui::WidgetText::RichText;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DefaultHiddenMaterialMode {
+    Auto,
+    Default,
+    Custom,
+}
+
+impl Default for DefaultHiddenMaterialMode {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+impl DefaultHiddenMaterialMode {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "Auto",
+            Self::Default => "Default",
+            Self::Custom => "Custom",
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Default)]
 pub struct RepakModManager {
     game_path: PathBuf,
@@ -105,6 +131,10 @@ pub struct RepakModManager {
     selected_category_filters: Vec<String>,
     #[serde(skip)]
     new_tag_name: String,
+    #[serde(skip)]
+    default_hidden_material_mode: DefaultHiddenMaterialMode,
+    #[serde(skip)]
+    default_hidden_material_bitmap_input: String,
     version: Option<String>,
 
     game_chunk_path: Option<PathBuf>,
@@ -1109,6 +1139,65 @@ impl RepakModManager {
                 .as_ref()
                 .map(|worker| !worker.is_finished())
                 .unwrap_or(false);
+            egui::CollapsingHeader::new(format!(
+                "Hidden mats: {}",
+                self.default_hidden_material_mode.label()
+            ))
+            .id_salt(("default_hidden_material_mode", i))
+            .show(ui, |ui| {
+                ui.radio_value(
+                    &mut self.default_hidden_material_mode,
+                    DefaultHiddenMaterialMode::Auto,
+                    "Auto",
+                );
+                ui.radio_value(
+                    &mut self.default_hidden_material_mode,
+                    DefaultHiddenMaterialMode::Default,
+                    "Default",
+                );
+                ui.radio_value(
+                    &mut self.default_hidden_material_mode,
+                    DefaultHiddenMaterialMode::Custom,
+                    "Custom",
+                );
+            });
+            if self.default_hidden_material_mode == DefaultHiddenMaterialMode::Custom {
+                ui.add(
+                    TextEdit::singleline(&mut self.default_hidden_material_bitmap_input)
+                        .hint_text("0x0FFF0000,0x0FFF0000,0x0EFB0000")
+                        .desired_width(220.0),
+                );
+            }
+
+            let build_installed_iostore_mod = |kawaii_porter, default_hidden_material_patch| {
+                let mod_name = pak_path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or("fixed_mod")
+                    .to_string();
+                InstallableMod {
+                    mod_name,
+                    mod_type: "".to_string(),
+                    repak: false,
+                    fix_mesh: false,
+                    kawaii_porter,
+                    default_hidden_material_patch,
+                    is_dir: false,
+                    reader: None,
+                    mod_path: pak_path.to_path_buf(),
+                    mount_point: "../../../".to_string(),
+                    path_hash_seed: "00000000".to_string(),
+                    compression: repak::Compression::Oodle,
+                    total_files: 1,
+                    iostore: true,
+                    is_archived: false,
+                    editing: false,
+                    enabled: true,
+                    obfuscated: false,
+                    extracted_archive_dir: None,
+                }
+            };
+
             if ui
                 .add_enabled(!fix_kawaii_running, Button::new("Fix KawaiiPhysics"))
                 .clicked()
@@ -1126,31 +1215,7 @@ impl RepakModManager {
                         .show();
                     return;
                 };
-                let mod_name = pak_path
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .unwrap_or("fixed_mod")
-                    .to_string();
-                let installable_mod = InstallableMod {
-                    mod_name,
-                    mod_type: "".to_string(),
-                    repak: false,
-                    fix_mesh: false,
-                    kawaii_porter: true,
-                    is_dir: false,
-                    reader: None,
-                    mod_path: pak_path.to_path_buf(),
-                    mount_point: "../../../".to_string(),
-                    path_hash_seed: "00000000".to_string(),
-                    compression: repak::Compression::Oodle,
-                    total_files: 1,
-                    iostore: true,
-                    is_archived: false,
-                    editing: false,
-                    enabled: true,
-                    obfuscated: false,
-                    extracted_archive_dir: None,
-                };
+                let installable_mod = build_installed_iostore_mod(true, false);
 
                 crate::install_terminal::clear_terminal();
                 self.show_fix_kawaii_terminal = true;
@@ -1170,6 +1235,64 @@ impl RepakModManager {
                         progress.clone(),
                         &Some(game_chunk_path),
                         &Some(kawaii_physics_usmap),
+                    )
+                    .map_err(|e| e.to_string());
+                    progress.store(-255, Ordering::SeqCst);
+                    result
+                }));
+            }
+            if ui
+                .add_enabled(!fix_kawaii_running, Button::new("Patch Hidden Materials"))
+                .clicked()
+            {
+                let default_hidden_material_bitmaps = match parse_default_hidden_material_bitmaps(
+                    self.default_hidden_material_mode,
+                    &self.default_hidden_material_bitmap_input,
+                ) {
+                    Ok(bitmaps) => bitmaps,
+                    Err(error) => {
+                        rfd::MessageDialog::new()
+                            .set_buttons(MessageButtons::Ok)
+                            .set_title("Invalid bitmap")
+                            .set_description(error)
+                            .show();
+                        return;
+                    }
+                };
+                let Some(game_chunk_path) = self.game_chunk_path.clone() else {
+                    warn!("Cannot patch hidden materials without a detected game chunk path");
+                    return;
+                };
+                self.update_kawaii_usmap_if_needed(true);
+                let Some(kawaii_physics_usmap) = self.kawaii_physics_usmap.clone() else {
+                    rfd::MessageDialog::new()
+                        .set_buttons(MessageButtons::Ok)
+                        .set_title("Missing mapping file")
+                        .set_description("Select a KawaiiPhysics unversioned mapping file before patching hidden materials.")
+                        .show();
+                    return;
+                };
+                let installable_mod = build_installed_iostore_mod(false, true);
+
+                crate::install_terminal::clear_terminal();
+                self.show_fix_kawaii_terminal = true;
+                self.fix_kawaii_progress = Arc::new(AtomicI32::new(0));
+                #[cfg(windows)]
+                if crate::has_attached_console() {
+                    crate::redirect_stdio();
+                }
+
+                let game_path = self.game_path.clone();
+                let progress = self.fix_kawaii_progress.clone();
+                info!(mod_name = %installable_mod.mod_name, "Starting hidden materials patch worker with egui terminal progress");
+                self.fix_kawaii_worker = Some(thread::spawn(move || {
+                    let result = patch_installed_iostore_default_hidden_materials(
+                        &installable_mod,
+                        &game_path,
+                        progress.clone(),
+                        &Some(game_chunk_path),
+                        &Some(kawaii_physics_usmap),
+                        default_hidden_material_bitmaps.as_deref(),
                     )
                     .map_err(|e| e.to_string());
                     progress.store(-255, Ordering::SeqCst);
@@ -2789,6 +2912,47 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 
 fn same_mod_identity(left: &Path, right: &Path) -> bool {
     normalized_mod_identity(left) == normalized_mod_identity(right)
+}
+
+fn parse_default_hidden_material_bitmaps(
+    mode: DefaultHiddenMaterialMode,
+    value: &str,
+) -> Result<Option<Vec<u64>>, String> {
+    match mode {
+        DefaultHiddenMaterialMode::Auto => return Ok(None),
+        DefaultHiddenMaterialMode::Default => {
+            return Ok(Some(DEFAULT_HIDDEN_MATERIAL_BITMAPS.to_vec()))
+        }
+        DefaultHiddenMaterialMode::Custom => {}
+    }
+
+    let value = value.trim();
+    if value.is_empty() {
+        return Err("Custom bitmap list is empty".to_string());
+    }
+
+    let mut bitmaps = Vec::new();
+    for raw_part in value.split([',', ';', '|']) {
+        let part = raw_part.trim();
+        if part.is_empty() {
+            continue;
+        }
+
+        let bitmap = if let Some(hex) = part.strip_prefix("0x").or_else(|| part.strip_prefix("0X"))
+        {
+            u64::from_str_radix(hex, 16).map_err(|e| format!("Invalid hex bitmap {part:?}: {e}"))?
+        } else {
+            part.parse::<u64>()
+                .map_err(|e| format!("Invalid bitmap {part:?}: {e}"))?
+        };
+        bitmaps.push(bitmap);
+    }
+
+    if bitmaps.is_empty() {
+        Err("Bitmap list is empty".to_string())
+    } else {
+        Ok(Some(bitmaps))
+    }
 }
 
 fn normalized_mod_identity(path: &Path) -> PathBuf {

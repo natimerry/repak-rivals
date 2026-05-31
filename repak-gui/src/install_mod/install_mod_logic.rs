@@ -127,6 +127,8 @@ fn repack_iostore_via_fast_extract(
     chunkdir: &Option<PathBuf>,
     kawaii_physics_usmap: &Option<PathBuf>,
     kawaii_porter: bool,
+    patch_default_hidden_materials: bool,
+    default_hidden_material_bitmaps: Option<&[u64]>,
 ) -> Result<(), repak::Error> {
     let chunkdir = chunkdir.clone().ok_or_else(|| {
         repak::Error::Io(std::io::Error::other(
@@ -161,6 +163,7 @@ fn repack_iostore_via_fast_extract(
     fixed_mod.iostore = false;
     fixed_mod.repak = false;
     fixed_mod.kawaii_porter = kawaii_porter;
+    fixed_mod.default_hidden_material_patch = patch_default_hidden_materials;
     fixed_mod.mod_path = extracted_dir.clone();
     fixed_mod.reader = None;
 
@@ -171,6 +174,8 @@ fn repack_iostore_via_fast_extract(
         installed_mods_ptr,
         kawaii_physics_usmap.clone(),
         kawaii_porter,
+        patch_default_hidden_materials,
+        default_hidden_material_bitmaps,
     )?;
 
     Ok(())
@@ -192,6 +197,37 @@ pub fn fix_installed_iostore_kawaii_physics(
         chunkdir,
         kawaii_physics_usmap,
         true,
+        false,
+        None,
+    )?;
+
+    backup_existing_mod_files(mod_directory, &installable_mod.mod_name)
+        .map_err(repak::Error::Io)?;
+    copy_fixed_iostore_files(output_temp.path(), mod_directory, &installable_mod.mod_name)
+        .map_err(repak::Error::Io)?;
+
+    Ok(())
+}
+
+pub fn patch_installed_iostore_default_hidden_materials(
+    installable_mod: &InstallableMod,
+    mod_directory: &Path,
+    installed_mods_ptr: Arc<AtomicI32>,
+    chunkdir: &Option<PathBuf>,
+    kawaii_physics_usmap: &Option<PathBuf>,
+    default_hidden_material_bitmaps: Option<&[u64]>,
+) -> Result<(), repak::Error> {
+    let output_temp = tempfile::tempdir().map_err(repak::Error::Io)?;
+    repack_iostore_via_fast_extract(
+        installable_mod,
+        output_temp.path(),
+        mod_directory,
+        installed_mods_ptr,
+        chunkdir,
+        kawaii_physics_usmap,
+        false,
+        true,
+        default_hidden_material_bitmaps,
     )?;
 
     backup_existing_mod_files(mod_directory, &installable_mod.mod_name)
@@ -249,6 +285,8 @@ pub fn install_mods_in_viewport(
                     chunkdir,
                     kawaii_physics_usmap,
                     installable_mod.kawaii_porter,
+                    installable_mod.default_hidden_material_patch,
+                    None,
                 ) {
                     show_kawaii_error_dialog_if_relevant(&e.to_string());
                     error!(mod_name = %installable_mod.mod_name, error = %e, "Failed to repack IoStore mod");
@@ -292,6 +330,8 @@ pub fn install_mods_in_viewport(
                 installed_mods_ptr.clone(),
                 kawaii_physics_usmap,
                 installable_mod.kawaii_porter,
+                installable_mod.default_hidden_material_patch,
+                None,
             ) {
                 show_kawaii_error_dialog_if_relevant(&e.to_string());
                 error!(mod_name = %installable_mod.mod_name, error = %e, "Failed to create repak from pak");
@@ -327,6 +367,8 @@ pub fn install_mods_in_viewport(
                 installed_mods_ptr.clone(),
                 kawaii_physics_usmap.clone(),
                 installable_mod.kawaii_porter,
+                installable_mod.default_hidden_material_patch,
+                None,
             );
             if let Err(e) = res {
                 show_kawaii_error_dialog_if_relevant(&e.to_string());

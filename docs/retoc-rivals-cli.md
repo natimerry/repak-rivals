@@ -160,21 +160,54 @@ Repack an existing IoStore triple with obfuscation:
 retoc-rivals-cli pack ExistingMod_9999999_P.utoc --output fixed_mods --game-paks-dir "C:\Path\To\Paks" --full-iostore-check --obfuscate
 ```
 
-KawaiiPhysics:
+KawaiiPhysics and hidden materials:
 
 ```console
 retoc-rivals-cli pack path\to\MyModFolder --kawaii-physics --kawaii-physics-usmap mappings.usmap
 retoc-rivals-cli fix-kawaii-physics path\to\MyModFolder --usmap mappings.usmap
+retoc-rivals-cli pack path\to\MyModFolder --patch-default-hidden-mats --kawaii-physics-usmap mappings.usmap
+retoc-rivals-cli pack path\to\MyModFolder --default-hidden-material-bitmaps 0x0FFF0000,0x0FFF0000,0x0EFB0000 --kawaii-physics-usmap mappings.usmap
 ```
 
 KawaiiPhysics modes:
 
 | Mode | Input | Output | Use when |
 | --- | --- | --- | --- |
-| `--kawaii-physics` | raw dir, legacy pak/archive, or IoStore input | writes repacked `.pak/.utoc/.ucas` output | you want fixed installable mod files |
+| `--kawaii-physics` | raw dir, legacy pak/archive, or IoStore input | writes repacked `.pak/.utoc/.ucas` output | you want KawaiiPhysics assets ported while packing |
+| `--patch-default-hidden-mats` | raw dir, legacy pak/archive, or IoStore input | writes repacked `.pak/.utoc/.ucas` output | you want `DefaultHiddenMaterials` from carrier data |
+| `--default-hidden-material-bitmaps <MASKS>` | raw dir, legacy pak/archive, or IoStore input | writes repacked `.pak/.utoc/.ucas` output | you want explicit hidden-material masks |
 | `fix-kawaii-physics <dir>` | unpacked/raw asset directory only | modifies that directory in place; no package output | you want to patch assets before packing later |
 
-If `--kawaii-physics-usmap` is omitted, the CLI uses saved GUI config first, then downloads the latest Rivals depot mapping. IoStore inputs repacked with `--kawaii-physics` also need the game `Content\Paks` directory; pass `--game-paks-dir` or open repak-gui once so its saved config can be reused.
+`--kawaii-physics` is separate from hidden-material patching. Use `--patch-default-hidden-mats` or `--default-hidden-material-bitmaps` when you also want `LODInfo.DefaultHiddenMaterials`.
+
+If `--kawaii-physics-usmap` is omitted, the CLI uses saved GUI config first, then downloads the latest Rivals depot mapping. IoStore inputs repacked with `--kawaii-physics`, `--patch-default-hidden-mats`, or `--default-hidden-material-bitmaps` also need the game `Content\Paks` directory; pass `--game-paks-dir` or open repak-gui once so its saved config can be reused.
+
+DefaultHiddenMaterials masks:
+
+```console
+retoc-rivals-cli pack path\to\MyModFolder --default-hidden-material-bitmaps 0x0FFF0000
+retoc-rivals-cli pack path\to\MyModFolder --default-hidden-material-bitmaps 0x0FFF0000,0x0FFF0000,0x0EFB0000
+retoc-rivals-cli pack path\to\MyModFolder --default-hidden-material-bitmaps 268369920,268369920,251330560
+```
+
+| Rule | Meaning |
+| --- | --- |
+| one mask per LOD | first mask is LOD0, second is LOD1, third is LOD2, etc. |
+| one mask total | reused for every LOD |
+| fewer masks than LODs | last mask is reused for remaining LODs |
+| bit index | bit `0` controls material slot `0`, bit `1` controls slot `1`, etc. |
+| bit value | `1` writes `true`/hidden by default; `0` writes `false`/visible by default |
+| accepted forms | CLI accepts comma-separated decimal or `0x` hex `u64` values |
+| max slot bit | masks are `u64`, so they can directly set slots `0` through `63` |
+| array length | uses the mesh material count when available; otherwise uses the highest set bit plus one |
+
+The built-in default preset used by the GUI `Default` mode is:
+
+```text
+0x0FFF0000,0x0FFF0000,0x0EFB0000
+```
+
+That writes LOD0=`0x0FFF0000`, LOD1=`0x0FFF0000`, and LOD2=`0x0EFB0000`. In custom workflows, build masks from the material slot indices you want hidden.
 
 Compression:
 
@@ -193,8 +226,10 @@ retoc-rivals-cli pack path\to\MyModFolder --compression none
 | `--no-mod-suffix` | off | do not append `_9999999_P` |
 | `--obfuscate` | off | obfuscate generated IoStore |
 | `--compression <METHOD>` | `oodle` | `none`, `zlib`, `zstd`, `lz4`, `oodle` |
-| `--kawaii-physics` | off | port assets while converting |
+| `--kawaii-physics` | off | port KawaiiPhysics assets while converting |
 | `--kawaii-physics-usmap <PATH>` | saved GUI config, then auto-download | mapping file |
+| `--patch-default-hidden-mats` | off | patch `LODInfo.DefaultHiddenMaterials` from carrier data |
+| `--default-hidden-material-bitmaps <MASKS>` | off | override `LODInfo.DefaultHiddenMaterials` with comma-separated per-LOD integer bitmaps |
 | `--game-paks-dir <DIR>` | saved GUI config if available | deps for repacking IoStore with KawaiiPhysics, obfuscation, or non-default compression |
 | `--full-iostore-check` | off | slow all-container dependency path |
 
@@ -209,6 +244,8 @@ Output rules:
 | IoStore input with `--obfuscate` | to-legacy temp extraction, re-pack with obfuscated IoStore |
 | IoStore input with non-default `--compression` | to-legacy temp extraction, re-pack with selected compression |
 | IoStore input with `--kawaii-physics` | to-legacy temp extraction, Kawaii port, re-pack |
+| IoStore input with `--patch-default-hidden-mats` | to-legacy temp extraction, carrier autodetect, re-pack |
+| IoStore input with `--default-hidden-material-bitmaps` | to-legacy temp extraction, mask override, re-pack |
 
 `pack <dir>` treats a raw asset directory as one mod. Use `pack-dir` for a drop folder that contains a mix of raw mod folders, loose IoStore triples, legacy paks, and archives.
 
@@ -223,7 +260,7 @@ retoc-rivals-cli pack-dir "C:\Downloads\Rivals Mods" --output fixed_mods --kawai
 retoc-rivals-cli pack-dir "C:\Users\soham\Desktop\mods\WhitePimpStuff" --output "C:\Users\soham\Desktop\whitepfixed" --kawaii-physics --game-paks-dir "D:\SteamLibrary\steamapps\common\MarvelRivals\MarvelGame\Marvel\Content\Paks" --kawaii-physics-usmap mappings.usmap
 ```
 
-`pack-dir` discovers direct raw cooked mod folders, recursive IoStore triples, legacy paks, and `.7z`/`.zip`/`.rar` archives. It logs tree scanning and archive extraction. When IoStore inputs need repacking (`--obfuscate`, non-default `--compression`, or `--kawaii-physics`), it batches to-legacy extraction so game containers are opened once for the input set instead of once per archive.
+`pack-dir` discovers direct raw cooked mod folders, recursive IoStore triples, legacy paks, and `.7z`/`.zip`/`.rar` archives. It logs tree scanning and archive extraction. When IoStore inputs need repacking (`--obfuscate`, non-default `--compression`, `--kawaii-physics`, `--patch-default-hidden-mats`, or `--default-hidden-material-bitmaps`), it batches to-legacy extraction so game containers are opened once for the input set instead of once per archive.
 
 `pack-dir` supports `--kawaii-physics` because it is meant to produce fixed package outputs for every discovered mod. For in-place asset-only patching, unpack one mod to a raw directory first, then use `fix-kawaii-physics <dir>`.
 
@@ -236,8 +273,10 @@ retoc-rivals-cli pack-dir "C:\Users\soham\Desktop\mods\WhitePimpStuff" --output 
 | `--no-mod-suffix` | off | do not append `_9999999_P` |
 | `--obfuscate` | off | obfuscate generated IoStore |
 | `--compression <METHOD>` | `oodle` | `none`, `zlib`, `zstd`, `lz4`, `oodle` |
-| `--kawaii-physics` | off | port assets while converting |
+| `--kawaii-physics` | off | port KawaiiPhysics assets while converting |
 | `--kawaii-physics-usmap <PATH>` | saved GUI config, then auto-download | mapping file |
+| `--patch-default-hidden-mats` | off | patch `LODInfo.DefaultHiddenMaterials` from carrier data |
+| `--default-hidden-material-bitmaps <MASKS>` | off | override `LODInfo.DefaultHiddenMaterials` with comma-separated per-LOD integer bitmaps |
 | `--game-paks-dir <DIR>` | saved GUI config if available | deps for repacking IoStore with KawaiiPhysics, obfuscation, or non-default compression |
 | `--full-iostore-check` | off | open all game IoStore containers |
 
@@ -248,6 +287,8 @@ retoc-rivals-cli fix-kawaii-physics
 retoc-rivals-cli fix-kawaii-physics unpacked-mod
 retoc-rivals-cli fix-kawaii-physics --output fixed-mods
 retoc-rivals-cli fix-kawaii-physics --usmap mappings.usmap
+retoc-rivals-cli fix-kawaii-physics unpacked-mod --patch-default-hidden-mats
+retoc-rivals-cli fix-kawaii-physics unpacked-mod --default-hidden-material-bitmaps 0x0FFF0000,0x0FFF0000,0x0EFB0000
 ```
 
 | Option | Default | Meaning |
@@ -255,8 +296,10 @@ retoc-rivals-cli fix-kawaii-physics --usmap mappings.usmap
 | `<INPUT>` | none | optional raw asset directory to patch in-place |
 | `-o, --output <DIR>` | `fixed-mods` | rebuilt mod output directory |
 | `-u, --usmap <PATH>` | saved config, then auto-download | mapping file |
+| `--patch-default-hidden-mats` | off | patch `LODInfo.DefaultHiddenMaterials` from carrier data |
+| `--default-hidden-material-bitmaps <MASKS>` | off | override `LODInfo.DefaultHiddenMaterials` with comma-separated per-LOD integer bitmaps |
 
-With `<INPUT>`, this command walks the directory for `.uasset` files and patches KawaiiPhysics assets in place. Without `<INPUT>`, it uses saved GUI config for installed mods dir and game `Paks` dir, rebuilds installed IoStore mods, and writes fixed packages to `--output`.
+With `<INPUT>`, this command walks the directory for `.uasset` files and patches KawaiiPhysics assets in place. Add `--patch-default-hidden-mats` or `--default-hidden-material-bitmaps` to also patch `DefaultHiddenMaterials`. Without `<INPUT>`, it uses saved GUI config for installed mods dir and game `Paks` dir, rebuilds installed IoStore mods, and writes fixed packages to `--output`.
 
 ## Recipes
 

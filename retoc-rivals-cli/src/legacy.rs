@@ -16,7 +16,12 @@ pub fn fix_kawaii_physics(
     args: FixKawaiiPhysicsArgs,
 ) -> Result<(), String> {
     if let Some(input) = args.input.as_deref() {
-        return fix_kawaii_physics_directory(input, args.usmap.as_deref());
+        return fix_kawaii_physics_directory(
+            input,
+            args.usmap.as_deref(),
+            args.patch_default_hidden_mats,
+            default_hidden_material_bitmaps(&args),
+        );
     }
 
     let state = read_saved_state()?;
@@ -72,6 +77,8 @@ pub fn fix_kawaii_physics(
                 compression: crate::cli::CompressionArg::Oodle,
                 kawaii_physics: true,
                 kawaii_physics_usmap: Some(usmap.clone()),
+                patch_default_hidden_mats: args.patch_default_hidden_mats,
+                default_hidden_material_bitmaps: args.default_hidden_material_bitmaps.clone(),
                 game_paks_dir: Some(game_paks_dir.clone()),
                 full_iostore_check: false,
             },
@@ -82,7 +89,12 @@ pub fn fix_kawaii_physics(
     Ok(())
 }
 
-fn fix_kawaii_physics_directory(input: &Path, usmap_arg: Option<&Path>) -> Result<(), String> {
+fn fix_kawaii_physics_directory(
+    input: &Path,
+    usmap_arg: Option<&Path>,
+    patch_default_hidden_mats: bool,
+    default_hidden_material_bitmaps: Option<&[u64]>,
+) -> Result<(), String> {
     if !input.is_dir() {
         return Err(format!("Input is not a directory: {}", input.display()));
     }
@@ -98,10 +110,24 @@ fn fix_kawaii_physics_directory(input: &Path, usmap_arg: Option<&Path>) -> Resul
 
     tracing::info!(input = %input.display(), usmap = %usmap.display(), "Porting KawaiiPhysics assets in-place");
     println!("Fixing KawaiiPhysics assets in {}", input.display());
-    let ported = retoc::port_kawaii_physics_directory(input, &usmap, true)
-        .map_err(|e| format!("KawaiiPhysics directory fix failed: {e:#}"))?;
+    let ported = retoc::port_kawaii_physics_directory(
+        input,
+        &usmap,
+        true,
+        patch_default_hidden_mats,
+        default_hidden_material_bitmaps,
+    )
+    .map_err(|e| format!("KawaiiPhysics directory fix failed: {e:#}"))?;
     println!("Ported {ported} KawaiiPhysics anim nodes");
     Ok(())
+}
+
+fn default_hidden_material_bitmaps(args: &FixKawaiiPhysicsArgs) -> Option<&[u64]> {
+    if !args.default_hidden_material_bitmaps.is_empty() {
+        Some(args.default_hidden_material_bitmaps.as_slice())
+    } else {
+        None
+    }
 }
 
 fn installed_iostore_paks(mods_dir: &Path) -> std::io::Result<Vec<PathBuf>> {

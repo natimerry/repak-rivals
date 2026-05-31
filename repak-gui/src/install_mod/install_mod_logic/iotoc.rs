@@ -259,6 +259,8 @@ pub fn convert_directory_to_iostore(
     packed_files_count: Arc<AtomicI32>,
     kawaii_physics_usmap: Option<PathBuf>,
     kawaii_porter: bool,
+    patch_default_hidden_materials: bool,
+    default_hidden_material_bitmaps: Option<&[u64]>,
 ) -> Result<(), repak::Error> {
     let mod_type = pak.mod_type.clone();
     if mod_type == "Audio" || mod_type == "Movies" {
@@ -290,6 +292,19 @@ pub fn convert_directory_to_iostore(
     )
     .with_obfuscation(pak.obfuscated);
 
+    let needs_uassetapi = kawaii_porter
+        || patch_default_hidden_materials
+        || default_hidden_material_bitmaps.is_some();
+
+    if needs_uassetapi {
+        let usmap = kawaii_physics_usmap.clone().ok_or_else(|| {
+            repak::Error::Io(std::io::Error::other(
+                "UAssetAPI patching is enabled, but no USMAP file was provided",
+            ))
+        })?;
+        debug!(usmap = %usmap.display(), "Passing USMAP to UAssetAPI patcher");
+    }
+
     if kawaii_porter {
         let usmap = kawaii_physics_usmap.clone().ok_or_else(|| {
             repak::Error::Io(std::io::Error::other(
@@ -302,12 +317,21 @@ pub fn convert_directory_to_iostore(
         );
         action = action.with_kawaii_physics_port(usmap);
     }
+    if patch_default_hidden_materials {
+        action = action.with_default_hidden_material_patch();
+    }
+    if let Some(bitmaps) = default_hidden_material_bitmaps {
+        action = action.with_kawaii_physics_default_hidden_material_bitmaps(bitmaps.to_vec());
+    }
 
     let mut config = Config {
         container_header_version_override: None,
         port_kawaii_physics: kawaii_porter,
         kawaii_physics_usmap: kawaii_physics_usmap,
         kawaii_physics_force_rebuild: true,
+        patch_default_hidden_materials,
+        kawaii_physics_default_hidden_material_bitmaps: default_hidden_material_bitmaps
+            .map(|bitmaps| bitmaps.to_vec()),
         ..Default::default()
     };
 

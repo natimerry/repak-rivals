@@ -93,6 +93,8 @@ pub fn create_repak_from_pak(
     packed_files_count: Arc<AtomicI32>,
     kawaii_physics_usmap: &Option<PathBuf>,
     kawaii_porter: bool,
+    patch_default_hidden_materials: bool,
+    default_hidden_material_bitmaps: Option<&[u64]>,
 ) -> Result<(), repak::Error> {
     // extract the pak first into a temporary dir
     let temp_dir = tempdir().map_err(repak::Error::Io)?;
@@ -106,6 +108,8 @@ pub fn create_repak_from_pak(
         packed_files_count,
         kawaii_physics_usmap.clone(),
         kawaii_porter,
+        patch_default_hidden_materials,
+        default_hidden_material_bitmaps,
     )?;
     // repak_dir(pak, PathBuf::from(temp_path), mod_dir,packed_files_count)?;
     Ok(())

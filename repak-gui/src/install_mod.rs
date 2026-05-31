@@ -38,6 +38,7 @@ pub struct InstallableMod {
     pub repak: bool,
     pub fix_mesh: bool,
     pub kawaii_porter: bool,
+    pub default_hidden_material_patch: bool,
     pub is_dir: bool,
     pub editing: bool,
     pub path_hash_seed: String,
@@ -66,6 +67,7 @@ impl Default for InstallableMod {
             repak: false,
             fix_mesh: false,
             kawaii_porter: true,
+            default_hidden_material_patch: true,
             is_dir: false,
             editing: false,
             path_hash_seed: "".to_string(),
@@ -151,7 +153,7 @@ impl ModInstallRequest {
 
 impl ModInstallRequest {
     fn mod_needs_kawaii_mapping(mods: &InstallableMod) -> bool {
-        mods.kawaii_porter && (mods.is_dir || mods.repak)
+        (mods.kawaii_porter || mods.default_hidden_material_patch) && (mods.is_dir || mods.repak)
     }
 
     fn missing_kawaii_mapping_error(&self) -> Option<&'static str> {
@@ -161,7 +163,7 @@ impl ModInstallRequest {
             .any(|mods| mods.enabled && Self::mod_needs_kawaii_mapping(mods));
 
         if needs_mapping && self.kawaii_physics_usmap.is_none() {
-            Some("Select a mapping file before installing with KawaiiPhysics fixes enabled.")
+            Some("Select a mapping file before installing with UAssetAPI patches enabled.")
         } else {
             None
         }
@@ -249,7 +251,9 @@ impl ModInstallRequest {
                                         if crate::has_attached_console() {
                                             crate::redirect_stdio();
                                         }
-                                        info!("Starting install worker with egui terminal progress");
+                                        info!(
+                                            "Starting install worker with egui terminal progress"
+                                        );
                                     } else {
                                         info!("Starting install worker");
                                     }
@@ -426,6 +430,13 @@ impl ModInstallRequest {
                                 ui.add_enabled(
                                     porter_enabled,
                                     Checkbox::new(&mut mods.kawaii_porter, "Kawaii porter"),
+                                );
+                                ui.add_enabled(
+                                    porter_enabled,
+                                    Checkbox::new(
+                                        &mut mods.default_hidden_material_patch,
+                                        "Patch hidden mats",
+                                    ),
                                 );
                                 ui.add_enabled(
                                     (mods.is_dir || mods.repak) && false, // new retoc should auto patch

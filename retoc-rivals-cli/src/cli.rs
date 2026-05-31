@@ -3,6 +3,24 @@ use std::path::PathBuf;
 
 use crate::RIVALS_AES_KEY;
 
+pub fn parse_u64_bitmap(value: &str) -> Result<u64, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("bitmap value is empty".to_string());
+    }
+
+    if let Some(hex) = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+    {
+        u64::from_str_radix(hex, 16).map_err(|e| format!("invalid hex bitmap {value:?}: {e}"))
+    } else {
+        trimmed
+            .parse::<u64>()
+            .map_err(|e| format!("invalid bitmap {value:?}: {e}"))
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 pub struct Args {
@@ -134,6 +152,14 @@ pub struct PackArgs {
     #[arg(long)]
     pub kawaii_physics_usmap: Option<PathBuf>,
 
+    /// Patch LODInfo.DefaultHiddenMaterials from carrier data.
+    #[arg(long)]
+    pub patch_default_hidden_mats: bool,
+
+    /// Override LODInfo.DefaultHiddenMaterials using per-LOD integer bitmaps. Accepts comma-separated hex/decimal masks.
+    #[arg(long, value_parser = parse_u64_bitmap, value_delimiter = ',')]
+    pub default_hidden_material_bitmaps: Vec<u64>,
+
     /// Game Paks directory used when repacking IoStore with dependencies.
     #[arg(long)]
     pub game_paks_dir: Option<PathBuf>,
@@ -183,6 +209,14 @@ pub struct PackDirArgs {
     /// USMAP used by KawaiiPhysics porting. If omitted, saved config is used, then the latest mapping is downloaded.
     #[arg(long)]
     pub kawaii_physics_usmap: Option<PathBuf>,
+
+    /// Patch LODInfo.DefaultHiddenMaterials from carrier data.
+    #[arg(long)]
+    pub patch_default_hidden_mats: bool,
+
+    /// Override LODInfo.DefaultHiddenMaterials using per-LOD integer bitmaps. Accepts comma-separated hex/decimal masks.
+    #[arg(long, value_parser = parse_u64_bitmap, value_delimiter = ',')]
+    pub default_hidden_material_bitmaps: Vec<u64>,
 
     /// Game Paks directory used when repacking IoStore with dependencies. If omitted, saved GUI config is used.
     #[arg(long)]
@@ -234,4 +268,12 @@ pub struct FixKawaiiPhysicsArgs {
     /// USMAP used by KawaiiPhysics porting. If omitted, saved config is used, then latest mapping is downloaded.
     #[arg(short, long)]
     pub usmap: Option<PathBuf>,
+
+    /// Patch LODInfo.DefaultHiddenMaterials from carrier data.
+    #[arg(long)]
+    pub patch_default_hidden_mats: bool,
+
+    /// Override LODInfo.DefaultHiddenMaterials using per-LOD integer bitmaps. Accepts comma-separated hex/decimal masks.
+    #[arg(long, value_parser = parse_u64_bitmap, value_delimiter = ',')]
+    pub default_hidden_material_bitmaps: Vec<u64>,
 }

@@ -466,6 +466,7 @@ fn run_fix_kawaii_physics_cli() -> Result<(), String> {
             installable_mod.iostore = false;
             installable_mod.repak = false;
             installable_mod.kawaii_porter = true;
+            installable_mod.default_hidden_material_patch = false;
         }
 
         install_mods_in_viewport(
@@ -675,6 +676,8 @@ fn main() {
                     count,
                     None,
                     false,
+                    false,
+                    None,
                 )
                 .expect("Failed to convert directory");
             }

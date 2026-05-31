@@ -23,7 +23,7 @@ struct ExtractedArchive {
 }
 
 pub fn pack(aes_key: retoc::AesKey, mut args: PackArgs) -> Result<(), String> {
-    if args.kawaii_physics {
+    if args.kawaii_physics || should_patch_default_hidden_mats(&args) {
         args.kawaii_physics_usmap = Some(resolve_pack_usmap(args.kawaii_physics_usmap.as_deref())?);
     }
 
@@ -66,10 +66,12 @@ pub fn pack_dir(aes_key: retoc::AesKey, args: PackDirArgs) -> Result<(), String>
         compression: args.compression,
         kawaii_physics: args.kawaii_physics,
         kawaii_physics_usmap: args.kawaii_physics_usmap,
+        patch_default_hidden_mats: args.patch_default_hidden_mats,
+        default_hidden_material_bitmaps: args.default_hidden_material_bitmaps,
         game_paks_dir: args.game_paks_dir,
         full_iostore_check: args.full_iostore_check,
     };
-    if pack_args.kawaii_physics {
+    if pack_args.kawaii_physics || should_patch_default_hidden_mats(&pack_args) {
         pack_args.kawaii_physics_usmap = Some(resolve_pack_usmap(
             pack_args.kawaii_physics_usmap.as_deref(),
         )?);
@@ -448,6 +450,13 @@ fn pack_raw_dir(
     if let Some(usmap) = args.kawaii_physics_usmap.clone() {
         action = action.with_kawaii_physics_port(usmap);
     }
+    if args.patch_default_hidden_mats {
+        action = action.with_default_hidden_material_patch();
+    }
+    if let Some(default_hidden_material_bitmaps) = default_hidden_material_bitmaps(args) {
+        action = action
+            .with_kawaii_physics_default_hidden_material_bitmaps(default_hidden_material_bitmaps);
+    }
 
     tracing::info!(input = %input.display(), output = %output_dir.display(), "Packing directory into IoStore");
     println!("Packing {} to {}", input.display(), output_dir.display());
@@ -459,6 +468,8 @@ fn pack_raw_dir(
     config.port_kawaii_physics = args.kawaii_physics;
     config.kawaii_physics_usmap = args.kawaii_physics_usmap.clone();
     config.kawaii_physics_force_rebuild = true;
+    config.patch_default_hidden_materials = args.patch_default_hidden_mats;
+    config.kawaii_physics_default_hidden_material_bitmaps = default_hidden_material_bitmaps(args);
     action_to_zen(action, Arc::new(config)).map_err(|e| format!("Pack failed: {e:#}"))?;
 
     write_chunknames_pak(
@@ -521,7 +532,22 @@ fn input_stem(path: &Path) -> String {
 }
 
 fn should_repack_iostore(args: &PackArgs) -> bool {
-    args.kawaii_physics || args.obfuscate || args.compression != crate::cli::CompressionArg::Oodle
+    args.kawaii_physics
+        || should_patch_default_hidden_mats(args)
+        || args.obfuscate
+        || args.compression != crate::cli::CompressionArg::Oodle
+}
+
+fn should_patch_default_hidden_mats(args: &PackArgs) -> bool {
+    args.patch_default_hidden_mats || !args.default_hidden_material_bitmaps.is_empty()
+}
+
+fn default_hidden_material_bitmaps(args: &PackArgs) -> Option<Vec<u64>> {
+    if !args.default_hidden_material_bitmaps.is_empty() {
+        Some(args.default_hidden_material_bitmaps.clone())
+    } else {
+        None
+    }
 }
 
 fn output_dir_for(args: &PackArgs, default_output: &Path, item_name: &str) -> PathBuf {
