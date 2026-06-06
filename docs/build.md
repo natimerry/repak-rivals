@@ -16,6 +16,7 @@ Build from workspace root.
 | Package | Command |
 | --- | --- |
 | GUI | `cargo build -p repak-gui --release` |
+| material/Kawaii editor | `cargo build -p remat-rivals --release` |
 | current CLI | `cargo build -p retoc-rivals-cli --release` |
 | old pak CLI | `cargo build -p repak_cli --release` |
 | retoc library | `cargo check -p retoc` |
@@ -24,6 +25,7 @@ Build from workspace root.
 
 ```console
 cargo run -p repak-gui
+cargo run -p remat-rivals
 cargo run -p retoc-rivals-cli -- --help
 cargo run -p retoc-rivals-cli -- pack --help
 ```
@@ -47,6 +49,7 @@ cargo check -p retoc-rivals-cli
 
 ```console
 cargo build -p repak-gui --release
+cargo build -p remat-rivals --release
 cargo build -p retoc-rivals-cli --release
 ```
 
@@ -81,6 +84,7 @@ user to install .NET separately.
 | Path | Purpose |
 | --- | --- |
 | `repak-gui/` | eframe GUI |
+| `remat-rivals/` | eframe editor for material masks, Kawaii values, curves, and previewing |
 | `retoc-rivals-cli/` | Clap CLI for current workflows |
 | `retoc-rivals/` | IoStore conversion/extraction |
 | `repak/` | pak parsing/writing |

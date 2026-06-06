@@ -76,18 +76,23 @@ after extraction.
 
 | Mode | Meaning |
 | --- | --- |
-| `Auto` | read `LODHiddenMaterials` carrier data and inject `DefaultHiddenMaterials` |
+| `Auto` | read `LODHiddenMaterials` carrier data and inject `DefaultHiddenMaterials`; supports `MaterialTagPlugin` and `RivalsMeshMaterialManager` / `HiddenMaterialsAssetUserData` carriers |
 | `Default` | use the built-in mask preset `0x0FFF0000,0x0FFF0000,0x0EFB0000` |
-| `Custom` | show a mask text box; accepts decimal or `0x` hex masks separated by comma, semicolon, or pipe |
+| `Custom` | show a mask text box and `Creator` button; accepts decimal or `0x` hex masks separated by comma, semicolon, or pipe |
 
 ### Mask format
-- Each mask is a u64 bitfield for one LOD.
 
-- Bit 0 controls material slot 0.
-- Bit 1 controls material slot 1.
-- Bit 2 controls material slot 2.
-- A bit value of 1 means the corresponding material slot is hidden by default.
-- Slots 0 through 63 can be controlled directly.
+`DefaultHiddenMaterials` is a boolean array. Each material slot gets one boolean:
+
+| Value | Meaning |
+| --- | --- |
+| `true` | material slot is hidden by default |
+| `false` | material slot is visible by default |
+
+Each mask is a `u64` bitfield for one LOD. Bit `0` controls material slot `0`,
+bit `1` controls material slot `1`, and bit `2` controls material slot `2`.
+A bit value of `1` writes `true`; a bit value of `0` writes `false`.
+Slots `0` through `63` can be controlled directly.
 
 Masks may be written in decimal or hexadecimal form. Separate multiple masks with commas.
 ```
@@ -103,7 +108,9 @@ Masks may be written in decimal or hexadecimal form. Separate multiple masks wit
 
 If fewer masks are provided than the asset has LODs, the final mask is reused for all remaining LODs.
 
-A mask generator will be shipped in the future.
+The bitmap creator builds this string for you. In `Custom`, click `Creator`,
+set the slot count, check the slots that should be `true`/hidden, and click
+`Apply`.
 
 
 ## KawaiiPhysics Mapping

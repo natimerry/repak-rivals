@@ -116,6 +116,7 @@ fn fix_kawaii_physics_directory(
         true,
         patch_default_hidden_mats,
         default_hidden_material_bitmaps,
+        None,
     )
     .map_err(|e| format!("KawaiiPhysics directory fix failed: {e:#}"))?;
     println!("Ported {ported} KawaiiPhysics anim nodes");

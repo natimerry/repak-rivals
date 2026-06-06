@@ -8,6 +8,7 @@ Marvel Rivals mod packaging, conversion, extraction, inspection, and install too
 | --- | --- | --- |
 | `repak-gui` | normal mod install/manage workflow; archives; raw folders; legacy pak repack; IoStore mods | script automation |
 | `retoc-rivals-cli` | scriptable `.pak`/`.utoc`/`.ucas`, archive, directory, manifest, KawaiiPhysics, and conversion workflows | visual mod management |
+| `remat-rivals` | extracted-asset material mask and KawaiiPhysics value/curve editing | normal one-click installs |
 | `repak_cli` | pak-only legacy inspection/extraction/packing | modern Rivals IoStore output (`.utoc`/`.ucas`) |
 
 Modern Marvel Rivals mods normally install into:
@@ -32,6 +33,7 @@ MarvelRivals\MarvelGame\Marvel\Content\Paks\~mods
 | --- | --- |
 | [GUI](docs/gui.md) | install flow, mod list, tags, file table, KawaiiPhysics mapping |
 | [retoc-rivals-cli](docs/retoc-rivals-cli.md) | commands, accepted inputs, examples, filters, compression, full IoStore checks |
+| [remat-rivals](docs/remat-rivals.md) | material masks, Kawaii values, curve editing, preview limitations |
 | [Build](docs/build.md) | Rust builds, run commands, workspace packages |
 | [Troubleshooting](docs/troubleshooting.md) | game path, locked files, KawaiiPhysics, IoStore dependency failures |
 | [Release Automation](docs/release-automation.md) | Nexus Mods workflow inputs and config |
@@ -42,6 +44,7 @@ MarvelRivals\MarvelGame\Marvel\Content\Paks\~mods
 | Path | Purpose |
 | --- | --- |
 | `repak-gui/` | primary GUI app |
+| `remat-rivals/` | material/Kawaii editor GUI |
 | `retoc-rivals-cli/` | current scriptable Rivals CLI |
 | `retoc-rivals/` | IoStore conversion/extraction library |
 | `repak/` | pak reader/writer library |
@@ -53,8 +56,10 @@ MarvelRivals\MarvelGame\Marvel\Content\Paks\~mods
 
 ```console
 cargo run -p repak-gui
+cargo run -p remat-rivals
 cargo run -p retoc-rivals-cli -- --help
 cargo build -p repak-gui --release
+cargo build -p remat-rivals --release
 cargo build -p retoc-rivals-cli --release
 cargo check
 ```
