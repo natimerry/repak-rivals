@@ -179,10 +179,19 @@ KawaiiPhysics modes:
 | `fix-kawaii-physics <dir>` | unpacked/raw asset directory only | modifies that directory in place; no package output | you want to patch assets before packing later |
 
 `--kawaii-physics` is separate from hidden-material patching. Use `--patch-default-hidden-mats` or `--default-hidden-material-bitmaps` when you also want `LODInfo.DefaultHiddenMaterials`.
+Carrier autodetect supports both the older `MaterialTagPlugin` carrier and the newer `RivalsMeshMaterialManager` / `HiddenMaterialsAssetUserData` carrier. The carrier's `HiddenMaterials` values may be stored as bools or `uint8` bytes.
 
 If `--kawaii-physics-usmap` is omitted, the CLI uses saved GUI config first, then downloads the latest Rivals depot mapping. IoStore inputs repacked with `--kawaii-physics`, `--patch-default-hidden-mats`, or `--default-hidden-material-bitmaps` also need the game `Content\Paks` directory; pass `--game-paks-dir` or open repak-gui once so its saved config can be reused.
 
 DefaultHiddenMaterials masks:
+
+`DefaultHiddenMaterials` is a `TArray<bool>` on each LOD. Each boolean maps to
+one material slot.
+
+| Bool value | Game behavior |
+| --- | --- |
+| `true` | material slot is hidden by default |
+| `false` | material slot is visible by default |
 
 ```console
 retoc-rivals-cli pack path\to\MyModFolder --default-hidden-material-bitmaps 0x0FFF0000
@@ -196,7 +205,7 @@ retoc-rivals-cli pack path\to\MyModFolder --default-hidden-material-bitmaps 2683
 | one mask total | reused for every LOD |
 | fewer masks than LODs | last mask is reused for remaining LODs |
 | bit index | bit `0` controls material slot `0`, bit `1` controls slot `1`, etc. |
-| bit value | `1` writes `true`/hidden by default; `0` writes `false`/visible by default |
+| bit value | `1` writes `true`; `0` writes `false` |
 | accepted forms | CLI accepts comma-separated decimal or `0x` hex `u64` values |
 | max slot bit | masks are `u64`, so they can directly set slots `0` through `63` |
 | array length | uses the mesh material count when available; otherwise uses the highest set bit plus one |

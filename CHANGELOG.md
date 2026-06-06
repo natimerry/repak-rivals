@@ -1,27 +1,30 @@
 # Changelog
 
-## Version 3.4.0
+## Version 3.4.1
 
 ### Changes
 
 - Add Marvel Rivals `LODInfo.DefaultHiddenMaterials` patching through UAssetAPI for SkeletalMesh assets for use with MaterialTagPlugin.
 - Add carrier autodetection for `LODHiddenMaterials` AssetUserData and inject the proprietary `DefaultHiddenMaterials: TArray<bool>` field into each `FSkeletalMeshLODInfo`.
+- Support the `RivalsMeshMaterialManager` rebrand by detecting `HiddenMaterialsAssetUserData`, remapping its imports to Engine `AssetUserData`, and reading `HiddenMaterials` arrays stored as `uint8` bytes.
 - Add explicit bitmap override support for `DefaultHiddenMaterials`; each integer mask maps bit `n` to material slot `n`, with `1` meaning hidden by default.
 - Split KawaiiPhysics porting from hidden-material patching in the GUI and CLI so `Fix KawaiiPhysics` / `--kawaii-physics` no longer silently patches hidden materials.
 - Add GUI install option `Patch hidden mats` for normal install autodetection, separate from `Kawaii porter`.
 - Add installed-mod right-click action `Patch Hidden Materials` with `Auto`, `Default`, and `Custom` mask modes.
+- Add a GUI bitmap creator for custom `DefaultHiddenMaterials` masks.
 - Add CLI flags `--patch-default-hidden-mats` for carrier autodetection and `--default-hidden-material-bitmaps <MASKS>` for explicit per-LOD masks.
+- Add JSON option plumbing through `KawaiiPhysicsBinding`/`retoc` so editor tools can write Kawaii scalar and curve overrides.
 - Document the default mask preset `0x0FFF0000,0x0FFF0000,0x0EFB0000` for right-click/default override workflows.
 
 ### Mask Usage
 
-- GUI install: keep `Patch hidden mats` enabled to use carrier autodetection during normal install. There is no bitmap field in normal install.
+- GUI install: keep `Patch hidden mats` enabled to use carrier autodetection during normal install. This ensures parity with UassetTool and MaterialTagPlugin from Xzant.
 - GUI installed mod right-click: use `Patch Hidden Materials`, then choose `Auto`, `Default`, or `Custom`.
 - CLI carrier autodetect: pass `--patch-default-hidden-mats`.
 - CLI explicit masks: pass `--default-hidden-material-bitmaps 0x0FFF0000,0x0FFF0000,0x0EFB0000`.
 - Mask order is per LOD: first value is LOD0, second is LOD1, third is LOD2.
 - Bit `n` controls material slot `n`; `1` means hidden by default, `0` means visible by default.
-- Masks are `u64`, so they can directly set material slots `0` through `63`.
+- GUI custom masks: click `Creator`, check slots that should become `true`/hidden, then apply the generated mask.
 - A single mask is reused for every LOD. If fewer masks than LODs are provided, the final mask repeats.
 - CLI masks accept comma-separated decimal or `0x` hex `u64` values. GUI `Custom` accepts comma, semicolon, or pipe separators.
 

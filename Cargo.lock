@@ -1493,6 +1493,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_plot"
+version = "0.31.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1794c66fb727dac28dffed2e4b548e5118d1cccc331d368a35411d68725dde71"
+dependencies = [
+ "ahash",
+ "egui",
+ "emath",
+]
+
+[[package]]
 name = "ehttp"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3276,7 +3287,7 @@ checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
 name = "oodle_loader"
-version = "3.4.0"
+version = "3.4.1"
 dependencies = [
  "hex",
  "libloading 0.8.6",
@@ -3837,6 +3848,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
+name = "remat-rivals"
+version = "3.4.1"
+dependencies = [
+ "anyhow",
+ "eframe",
+ "egui_plot",
+ "retoc",
+ "rfd",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+ "walkdir",
+]
+
+[[package]]
 name = "renderdoc-sys"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3844,7 +3871,7 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "repak"
-version = "3.4.0"
+version = "3.4.1"
 dependencies = [
  "aes",
  "base64 0.22.1",
@@ -3863,7 +3890,7 @@ dependencies = [
 
 [[package]]
 name = "repak-gui"
-version = "3.4.0"
+version = "3.4.1"
 dependencies = [
  "colored",
  "dirs",
@@ -3993,7 +4020,7 @@ dependencies = [
 
 [[package]]
 name = "retoc-rivals-cli"
-version = "3.4.0"
+version = "3.4.1"
 dependencies = [
  "clap",
  "dirs",
@@ -4414,7 +4441,7 @@ checksum = "d66dc143e6b11c1eddc06d5c423cfc97062865baf299914ab64caa38182078fe"
 
 [[package]]
 name = "simd_str_cmp"
-version = "3.4.0"
+version = "3.4.1"
 dependencies = [
  "criterion",
  "once_cell",

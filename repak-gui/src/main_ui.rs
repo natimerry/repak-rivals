@@ -44,6 +44,8 @@ use walkdir::WalkDir;
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 const RED_THEME_COLOR: Color32 = Color32::from_rgb(255, 31, 75);
 const DEFAULT_HIDDEN_MATERIAL_BITMAPS: [u64; 3] = [0x0FFF0000, 0x0FFF0000, 0x0EFB0000];
+const DEFAULT_HIDDEN_MATERIAL_CREATOR_SLOTS: usize = 32;
+const MAX_DEFAULT_HIDDEN_MATERIAL_SLOTS: usize = 64;
 // use eframe::egui::WidgetText::RichText;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -135,6 +137,12 @@ pub struct RepakModManager {
     default_hidden_material_mode: DefaultHiddenMaterialMode,
     #[serde(skip)]
     default_hidden_material_bitmap_input: String,
+    #[serde(skip)]
+    show_default_hidden_material_bitmap_creator: bool,
+    #[serde(skip)]
+    default_hidden_material_creator_lods: Vec<u64>,
+    #[serde(skip)]
+    default_hidden_material_creator_slots: usize,
     version: Option<String>,
 
     game_chunk_path: Option<PathBuf>,
@@ -1162,11 +1170,16 @@ impl RepakModManager {
                 );
             });
             if self.default_hidden_material_mode == DefaultHiddenMaterialMode::Custom {
-                ui.add(
-                    TextEdit::singleline(&mut self.default_hidden_material_bitmap_input)
-                        .hint_text("0x0FFF0000,0x0FFF0000,0x0EFB0000")
-                        .desired_width(220.0),
-                );
+                ui.horizontal(|ui| {
+                    ui.add(
+                        TextEdit::singleline(&mut self.default_hidden_material_bitmap_input)
+                            .hint_text("0x0FFF0000,0x0FFF0000,0x0EFB0000")
+                            .desired_width(220.0),
+                    );
+                    if ui.button("Creator").clicked() {
+                        self.open_default_hidden_material_bitmap_creator();
+                    }
+                });
             }
 
             let build_installed_iostore_mod = |kawaii_porter, default_hidden_material_patch| {
@@ -1369,6 +1382,151 @@ impl RepakModManager {
                 }
             });
         }
+    }
+
+    fn open_default_hidden_material_bitmap_creator(&mut self) {
+        self.default_hidden_material_mode = DefaultHiddenMaterialMode::Custom;
+
+        let parsed = if self.default_hidden_material_bitmap_input.trim().is_empty() {
+            None
+        } else {
+            parse_default_hidden_material_bitmap_list(&self.default_hidden_material_bitmap_input)
+                .ok()
+        };
+
+        self.default_hidden_material_creator_lods =
+            parsed.unwrap_or_else(|| DEFAULT_HIDDEN_MATERIAL_BITMAPS.to_vec());
+        if self.default_hidden_material_creator_lods.is_empty() {
+            self.default_hidden_material_creator_lods
+                .extend(DEFAULT_HIDDEN_MATERIAL_BITMAPS);
+        }
+
+        self.default_hidden_material_creator_slots =
+            suggested_hidden_material_slot_count(&self.default_hidden_material_creator_lods);
+        self.show_default_hidden_material_bitmap_creator = true;
+    }
+
+    fn show_default_hidden_material_bitmap_creator(&mut self, ctx: &egui::Context) {
+        if !self.show_default_hidden_material_bitmap_creator {
+            return;
+        }
+
+        if self.default_hidden_material_creator_lods.is_empty() {
+            self.default_hidden_material_creator_lods
+                .extend(DEFAULT_HIDDEN_MATERIAL_BITMAPS);
+        }
+        if self.default_hidden_material_creator_slots == 0 {
+            self.default_hidden_material_creator_slots =
+                suggested_hidden_material_slot_count(&self.default_hidden_material_creator_lods);
+        }
+
+        let mut open = self.show_default_hidden_material_bitmap_creator;
+        let mut apply = false;
+        egui::Window::new("DefaultHiddenMaterials Bitmap Creator")
+            .open(&mut open)
+            .resizable(true)
+            .default_width(640.0)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Slots");
+                    ui.add(
+                        egui::DragValue::new(&mut self.default_hidden_material_creator_slots)
+                            .range(1..=MAX_DEFAULT_HIDDEN_MATERIAL_SLOTS),
+                    );
+                    if ui.button("Default").clicked() {
+                        self.default_hidden_material_creator_lods =
+                            DEFAULT_HIDDEN_MATERIAL_BITMAPS.to_vec();
+                        self.default_hidden_material_creator_slots =
+                            suggested_hidden_material_slot_count(
+                                &self.default_hidden_material_creator_lods,
+                            );
+                    }
+                    if ui.button("Clear").clicked() {
+                        for mask in &mut self.default_hidden_material_creator_lods {
+                            *mask = 0;
+                        }
+                    }
+                    if ui.button("Add LOD").clicked() {
+                        let mask = self
+                            .default_hidden_material_creator_lods
+                            .last()
+                            .copied()
+                            .unwrap_or(0);
+                        self.default_hidden_material_creator_lods.push(mask);
+                    }
+                    if ui
+                        .add_enabled(
+                            self.default_hidden_material_creator_lods.len() > 1,
+                            Button::new("Remove LOD"),
+                        )
+                        .clicked()
+                    {
+                        self.default_hidden_material_creator_lods.pop();
+                    }
+                });
+
+                ui.label(
+                    "Checked = true = hidden by default. Unchecked = false = visible by default.",
+                );
+                ui.separator();
+
+                ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+                    for (lod_idx, mask) in self
+                        .default_hidden_material_creator_lods
+                        .iter_mut()
+                        .enumerate()
+                    {
+                        ui.horizontal(|ui| {
+                            ui.strong(format!("LOD{lod_idx}"));
+                            ui.monospace(format!("0x{mask:016X}"));
+                        });
+
+                        for base in (0..self.default_hidden_material_creator_slots).step_by(8) {
+                            ui.horizontal(|ui| {
+                                let end =
+                                    (base + 8).min(self.default_hidden_material_creator_slots);
+                                for slot in base..end {
+                                    let bit = 1u64 << slot;
+                                    let mut hidden = (*mask & bit) != 0;
+                                    let response = ui.checkbox(&mut hidden, slot.to_string());
+                                    if response.changed() {
+                                        if hidden {
+                                            *mask |= bit;
+                                        } else {
+                                            *mask &= !bit;
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                        ui.add_space(8.0);
+                    }
+                });
+
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("Output");
+                    let mut output = format_default_hidden_material_bitmaps(
+                        &self.default_hidden_material_creator_lods,
+                    );
+                    ui.add(
+                        TextEdit::singleline(&mut output)
+                            .desired_width(360.0)
+                            .interactive(false),
+                    );
+                    if ui.button("Apply").clicked() {
+                        apply = true;
+                    }
+                });
+            });
+
+        if apply {
+            self.default_hidden_material_bitmap_input =
+                format_default_hidden_material_bitmaps(&self.default_hidden_material_creator_lods);
+            self.default_hidden_material_mode = DefaultHiddenMaterialMode::Custom;
+            open = false;
+        }
+        self.show_default_hidden_material_bitmap_creator = open;
     }
 
     fn category_options(&self) -> Vec<String> {
@@ -2531,6 +2689,7 @@ impl eframe::App for RepakModManager {
         self.process_fix_kawaii_worker(ctx);
         self.process_kawaii_runtime_messages(ctx);
         self.show_kawaii_runtime_window(ctx);
+        self.show_default_hidden_material_bitmap_creator(ctx);
 
         if let Some(ref mut welcome) = self.welcome_screen {
             if !self.hide_welcome {
@@ -2926,6 +3085,10 @@ fn parse_default_hidden_material_bitmaps(
         DefaultHiddenMaterialMode::Custom => {}
     }
 
+    Ok(Some(parse_default_hidden_material_bitmap_list(value)?))
+}
+
+fn parse_default_hidden_material_bitmap_list(value: &str) -> Result<Vec<u64>, String> {
     let value = value.trim();
     if value.is_empty() {
         return Err("Custom bitmap list is empty".to_string());
@@ -2951,7 +3114,33 @@ fn parse_default_hidden_material_bitmaps(
     if bitmaps.is_empty() {
         Err("Bitmap list is empty".to_string())
     } else {
-        Ok(Some(bitmaps))
+        Ok(bitmaps)
+    }
+}
+
+fn format_default_hidden_material_bitmaps(bitmaps: &[u64]) -> String {
+    bitmaps
+        .iter()
+        .map(|bitmap| format!("0x{bitmap:X}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn suggested_hidden_material_slot_count(bitmaps: &[u64]) -> usize {
+    bitmaps
+        .iter()
+        .map(|bitmap| highest_set_bit(*bitmap).map(|bit| bit + 1).unwrap_or(1))
+        .max()
+        .unwrap_or(DEFAULT_HIDDEN_MATERIAL_CREATOR_SLOTS)
+        .max(DEFAULT_HIDDEN_MATERIAL_CREATOR_SLOTS)
+        .min(MAX_DEFAULT_HIDDEN_MATERIAL_SLOTS)
+}
+
+fn highest_set_bit(value: u64) -> Option<usize> {
+    if value == 0 {
+        None
+    } else {
+        Some((u64::BITS - 1 - value.leading_zeros()) as usize)
     }
 }
 
