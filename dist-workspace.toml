@@ -22,5 +22,5 @@ install-updater = false
 # Whether to install an updater program
 
 github-build-setup = "../dist-build-setup.yml"
-# post-announce-jobs = "../auto_upload_to_nexus.yml"
+# Post-announce jobs to run in CI
 post-announce-jobs = ["./.github/auto_upload_to_nexus.yml"]
