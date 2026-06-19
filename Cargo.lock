@@ -1493,17 +1493,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "egui_plot"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1794c66fb727dac28dffed2e4b548e5118d1cccc331d368a35411d68725dde71"
-dependencies = [
- "ahash",
- "egui",
- "emath",
-]
-
-[[package]]
 name = "ehttp"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3846,22 +3835,6 @@ name = "regex-syntax"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
-
-[[package]]
-name = "remat-rivals"
-version = "3.4.1"
-dependencies = [
- "anyhow",
- "eframe",
- "egui_plot",
- "retoc",
- "rfd",
- "serde",
- "serde_json",
- "tracing",
- "tracing-subscriber",
- "walkdir",
-]
 
 [[package]]
 name = "renderdoc-sys"
