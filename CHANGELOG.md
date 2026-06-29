@@ -1,5 +1,12 @@
 # Changelog
 
+## Version 3.5.0
+
+### Changes
+- Fix some Hidden material bugs.
+- Fix material tag exports breaking customisation and beach skins.
+- Minor perfomance fixes.
+
 ## Version 3.4.1
 
 ### Changes
