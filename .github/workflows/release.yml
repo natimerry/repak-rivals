@@ -44,6 +44,12 @@ on:
     tags:
       - '**[0-9]+.[0-9]+.[0-9]+*'
 
+# Do not let a stale PR build keep consuming runners. Tag releases are not
+# canceled mid-flight: a rerun for the same tag will wait instead.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # Run 'dist plan' (or host) to determine what tasks we need to do
   plan:
@@ -53,6 +59,9 @@ jobs:
       tag: ${{ !github.event.pull_request && github.ref_name || '' }}
       tag-flag: ${{ !github.event.pull_request && format('--tag={0}', github.ref_name) || '' }}
       publishing: ${{ !github.event.pull_request }}
+      # cargo-dist normally groups all targets sharing a runner into one matrix
+      # row. This output expands those rows so each target can use its own runner.
+      local_matrix: ${{ steps.plan.outputs.local_matrix }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -81,6 +90,40 @@ jobs:
           echo "dist ran successfully"
           cat plan-dist-manifest.json
           echo "manifest=$(jq -c "." plan-dist-manifest.json)" >> "$GITHUB_OUTPUT"
+
+          # cargo-dist's normal matrix can contain several --target flags in
+          # one row when targets use the same runner. Split only those rows:
+          # preserve every runner/container/setup field, retain rows without a
+          # target (for example a global-artifacts row), and make each target
+          # its own independent GitHub job.
+          local_matrix="$(jq -c '
+            (.ci.github.artifacts_matrix // {})
+            | if .include == null then .
+              else
+                {
+                  include: [
+                    .include[]
+                    | . as $entry
+                    | if (($entry.targets // []) | length) > 1 then
+                        $entry.targets[] as $target
+                        | $entry
+                        | .targets = [$target]
+                        | .dist_args = (
+                            (
+                              ($entry.dist_args // "")
+                              | gsub("(^|[[:space:]])--target=[^[:space:]]+"; "")
+                              | gsub("^[[:space:]]+|[[:space:]]+$"; "")
+                            )
+                            + " --target=" + $target
+                          )
+                      else
+                        $entry
+                      end
+                  ]
+                }
+              end
+          ' plan-dist-manifest.json)"
+          echo "local_matrix=$local_matrix" >> "$GITHUB_OUTPUT"
       - name: "Upload dist-manifest.json"
         uses: actions/upload-artifact@v7
         with:
@@ -96,17 +139,10 @@ jobs:
     if: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix.include != null && (needs.plan.outputs.publishing == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload') }}
     strategy:
       fail-fast: false
-      # Target platforms/runners are computed by dist in create-release.
-      # Each member of the matrix has the following arguments:
-      #
-      # - runner: the github runner
-      # - dist-args: cli flags to pass to dist
-      # - install-dist: expression to run to install dist on the runner
-      #
-      # Typically there will be:
-      # - 1 "global" task that builds universal installers
-      # - N "local" tasks that build each platform's binaries and platform-specific installers
-      matrix: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix }}
+      # cargo-dist computes the runner/container/tooling settings. The plan job
+      # expands multi-target rows, so every target that could otherwise share
+      # one runner is a distinct matrix job and builds in parallel.
+      matrix: ${{ fromJson(needs.plan.outputs.local_matrix) }}
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container && matrix.container.image || null }}
     env:
