@@ -713,7 +713,7 @@ fn main() {
         Box::new(|cc| {
             setup_custom_style(&cc.egui_ctx);
             Ok(Box::new(
-                RepakModManager::load(cc, path_reset).expect("Unable to load config"),
+                RepakModManager::load(cc, path_reset).unwrap_or(RepakModManager::default()),
             ))
         }),
     )
