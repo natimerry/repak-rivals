@@ -18,7 +18,7 @@ pub const RIVALS_AES_KEY: &str = "0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08
 pub const MOD_NAME_SUFFIX: &str = "_9999999_P";
 
 fn main() {
-    let args = Args::parse();
+    let args = Args::parse_from(cli::normalize_windows_output_args(std::env::args_os()));
     let verbosity = if args.verbose {
         tracing::Level::DEBUG
     } else {
@@ -34,14 +34,31 @@ fn main() {
 }
 
 fn run(args: Args) -> Result<(), String> {
+    let aes_key_override = args.aes_key;
+    let aes_key = match aes_key_override.clone() {
+        Some(key) => key,
+        None => RIVALS_AES_KEY
+            .parse()
+            .map_err(|error| format!("Invalid built-in AES key: {error}"))?,
+    };
+
     match args.command {
-        Command::Info(command) => info::info(args.aes_key, command),
-        Command::Manifest(command) => manifest::manifest(args.aes_key, command),
-        Command::Unpack(command) => unpack::unpack(args.aes_key, command),
-        Command::UnpackDir(command) => unpack::unpack_dir(args.aes_key, command),
-        Command::Pack(command) => pack::pack(args.aes_key, command),
-        Command::PackDir(command) => pack::pack_dir(args.aes_key, command),
-        Command::FixKawaiiPhysics(command) => legacy::fix_kawaii_physics(args.aes_key, command),
+        Command::Info(command) => info::info(aes_key, command),
+        Command::Manifest(command) => manifest::manifest(aes_key, command),
+        Command::Unpack(command) => unpack::unpack(aes_key, command),
+        Command::UnpackDir(command) => unpack::unpack_dir(aes_key, command),
+        Command::Pack(command) => pack::pack(
+            pack::PackCrypto::new(aes_key, aes_key_override, args.guid),
+            command,
+        ),
+        Command::PackDir(command) => pack::pack_dir(
+            pack::PackCrypto::new(aes_key, aes_key_override, args.guid),
+            command,
+        ),
+        Command::FixKawaiiPhysics(command) => legacy::fix_kawaii_physics(
+            pack::PackCrypto::new(aes_key, aes_key_override, args.guid),
+            command,
+        ),
     }
 }
 

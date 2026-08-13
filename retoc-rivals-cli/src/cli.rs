@@ -1,7 +1,33 @@
 use clap::{Parser, Subcommand, ValueEnum};
+use std::ffi::OsString;
 use std::path::PathBuf;
 
-use crate::RIVALS_AES_KEY;
+pub fn normalize_windows_output_args<I, S>(args: I) -> Vec<OsString>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
+    args.into_iter()
+        .flat_map(|arg| split_swallowed_output_arg(arg.into()))
+        .collect()
+}
+
+fn split_swallowed_output_arg(arg: OsString) -> Vec<OsString> {
+    let Some(value) = arg.to_str() else {
+        return vec![arg];
+    };
+
+    for (separator, option) in [("\" -o ", "-o"), ("\" --output ", "--output")] {
+        if let Some((input, output)) = value.rsplit_once(separator) {
+            let output = output.trim_matches('"');
+            if !input.is_empty() && !output.is_empty() {
+                return vec![input.into(), option.into(), output.into()];
+            }
+        }
+    }
+
+    vec![arg]
+}
 
 pub fn parse_u64_bitmap(value: &str) -> Result<u64, String> {
     let trimmed = value.trim();
@@ -24,9 +50,13 @@ pub fn parse_u64_bitmap(value: &str) -> Result<u64, String> {
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 pub struct Args {
-    /// 256-bit AES key used for Marvel Rivals IoStore containers.
-    #[arg(short, long, default_value = RIVALS_AES_KEY)]
-    pub aes_key: retoc::AesKey,
+    /// Override the 256-bit AES key used for encrypted IoStore containers.
+    #[arg(short, long)]
+    pub aes_key: Option<retoc::AesKey>,
+
+    /// Override the encryption key GUID written to generated IoStore containers.
+    #[arg(long, alias = "encryption-guid")]
+    pub guid: Option<retoc::FGuid>,
 
     /// Increase log verbosity.
     #[arg(short, long, global = true)]
@@ -276,4 +306,55 @@ pub struct FixKawaiiPhysicsArgs {
     /// Override LODInfo.DefaultHiddenMaterials using per-LOD integer bitmaps. Accepts comma-separated hex/decimal masks.
     #[arg(long, value_parser = parse_u64_bitmap, value_delimiter = ',')]
     pub default_hidden_material_bitmaps: Vec<u64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_windows_output_args, Args, Command, Parser};
+    use std::path::PathBuf;
+
+    #[test]
+    fn parses_custom_aes_key_and_guid() {
+        let args = Args::try_parse_from([
+            "retoc-rivals-cli",
+            "--aes-key",
+            "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20",
+            "--guid",
+            "01234567-89AB-CDEF-FEDC-BA9876543210",
+            "info",
+            "mod.pak",
+        ])
+        .unwrap();
+
+        assert_eq!(
+            args.guid.unwrap().to_string(),
+            "0123456789ABCDEFFEDCBA9876543210"
+        );
+        assert!(args.aes_key.is_some());
+    }
+
+    #[test]
+    fn crypto_overrides_are_absent_by_default() {
+        let args = Args::try_parse_from(["retoc-rivals-cli", "info", "mod.pak"]).unwrap();
+        assert!(args.aes_key.is_none());
+        assert!(args.guid.is_none());
+    }
+
+    #[test]
+    fn repairs_output_swallowed_by_windows_trailing_backslash_quote() {
+        let args = normalize_windows_output_args([
+            "retoc-rivals-cli",
+            "pack-dir",
+            r#"C:\Mods\Jubilee Reworked_9999999_P" -o C:\Output\lol2"#,
+        ]);
+        let args = Args::try_parse_from(args).unwrap();
+        let Command::PackDir(pack) = args.command else {
+            panic!("expected pack-dir");
+        };
+        assert_eq!(
+            pack.input,
+            PathBuf::from(r"C:\Mods\Jubilee Reworked_9999999_P")
+        );
+        assert_eq!(pack.output, Some(PathBuf::from(r"C:\Output\lol2")));
+    }
 }

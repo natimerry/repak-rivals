@@ -14,7 +14,8 @@ retoc-rivals-cli --help
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `-a, --aes-key <AES_KEY>` | Marvel Rivals AES key | IoStore AES key |
+| `-a, --aes-key <AES_KEY>` | none | override the AES key for encrypted IoStore input/output; otherwise the built-in Marvel Rivals key is used |
+| `--guid <GUID>` | none | override the encryption GUID written to generated IoStore `.utoc` files; hyphens are optional |
 | `-v, --verbose` | off | tracing verbosity |
 | `-h, --help` | | help |
 | `-V, --version` | | version |

@@ -1,6 +1,6 @@
 use crate::archive;
 use crate::cli::{PackArgs, PackDirArgs};
-use crate::config::read_saved_state;
+use crate::config::{read_saved_state, retoc_pack_config};
 use crate::iostore_ops;
 use crate::kawaii_utils;
 use crate::source::{classify_path, scan_directory_packages, IoStorePackage, PackageSource};
@@ -9,7 +9,7 @@ use crate::util::{
     collect_files, ensure_mod_name_suffix, pak_aes_key, parse_path_hash_seed, repak_compression,
     retoc_compression,
 };
-use retoc::{action_to_zen, ActionToZen, Config, EngineVersion, FGuid};
+use retoc::{action_to_zen, ActionToZen, Config, EngineVersion};
 use std::fs::{self, File};
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
@@ -22,7 +22,28 @@ struct ExtractedArchive {
     source_name: String,
 }
 
-pub fn pack(aes_key: retoc::AesKey, mut args: PackArgs) -> Result<(), String> {
+#[derive(Clone)]
+pub struct PackCrypto {
+    pub(crate) read_key: retoc::AesKey,
+    write_key: Option<retoc::AesKey>,
+    write_guid: Option<retoc::FGuid>,
+}
+
+impl PackCrypto {
+    pub fn new(
+        read_key: retoc::AesKey,
+        write_key: Option<retoc::AesKey>,
+        write_guid: Option<retoc::FGuid>,
+    ) -> Self {
+        Self {
+            read_key,
+            write_key,
+            write_guid,
+        }
+    }
+}
+
+pub fn pack(crypto: PackCrypto, mut args: PackArgs) -> Result<(), String> {
     if args.kawaii_physics || should_patch_default_hidden_mats(&args) {
         args.kawaii_physics_usmap = Some(resolve_pack_usmap(args.kawaii_physics_usmap.as_deref())?);
     }
@@ -36,7 +57,7 @@ pub fn pack(aes_key: retoc::AesKey, mut args: PackArgs) -> Result<(), String> {
             .unwrap_or_else(|| Path::new("."))
             .to_path_buf();
         pack_source(
-            &aes_key,
+            &crypto,
             &args,
             source,
             input_stem(input),
@@ -47,7 +68,7 @@ pub fn pack(aes_key: retoc::AesKey, mut args: PackArgs) -> Result<(), String> {
     Ok(())
 }
 
-pub fn pack_dir(aes_key: retoc::AesKey, args: PackDirArgs) -> Result<(), String> {
+pub fn pack_dir(crypto: PackCrypto, args: PackDirArgs) -> Result<(), String> {
     if !args.input.is_dir() {
         return Err(format!(
             "Input is not a directory: {}",
@@ -131,7 +152,7 @@ pub fn pack_dir(aes_key: retoc::AesKey, args: PackDirArgs) -> Result<(), String>
     );
     for raw_dir in &raw_dirs {
         pack_raw_dir(
-            &aes_key,
+            &crypto,
             &pack_args,
             raw_dir,
             &input_stem(raw_dir),
@@ -139,7 +160,7 @@ pub fn pack_dir(aes_key: retoc::AesKey, args: PackDirArgs) -> Result<(), String>
         )?;
     }
     pack_discovered_items(
-        &aes_key,
+        &crypto,
         &pack_args,
         iostore,
         legacy_paks,
@@ -163,7 +184,7 @@ fn resolve_pack_usmap(current: Option<&Path>) -> Result<PathBuf, String> {
 }
 
 fn pack_source(
-    aes_key: &retoc::AesKey,
+    crypto: &PackCrypto,
     args: &PackArgs,
     source: PackageSource,
     source_name: String,
@@ -172,11 +193,11 @@ fn pack_source(
 ) -> Result<(), String> {
     match source {
         PackageSource::RawDirectory(path) => {
-            pack_raw_dir(aes_key, args, &path, &source_name, default_output)
+            pack_raw_dir(crypto, args, &path, &source_name, default_output)
         }
-        PackageSource::LegacyPak(path) => repack_legacy_pak(aes_key, args, &path, default_output),
+        PackageSource::LegacyPak(path) => repack_legacy_pak(crypto, args, &path, default_output),
         PackageSource::IoStore(package) => {
-            pack_iostore_package(aes_key, args, &package, default_output, game_paks_dir)
+            pack_iostore_package(crypto, args, &package, default_output, game_paks_dir)
         }
         PackageSource::DirectoryPackages {
             root,
@@ -197,7 +218,7 @@ fn pack_source(
                     .to_path_buf()
             });
             pack_discovered_items(
-                aes_key,
+                crypto,
                 args,
                 iostore,
                 legacy_paks,
@@ -211,7 +232,7 @@ fn pack_source(
             let temp = archive::extract_archive(&path)?;
             let root = archive_payload_root(temp.path());
             pack_source(
-                aes_key,
+                crypto,
                 args,
                 classify_path(&root)?,
                 input_stem(&path),
@@ -223,7 +244,7 @@ fn pack_source(
 }
 
 fn pack_discovered_items(
-    aes_key: &retoc::AesKey,
+    crypto: &PackCrypto,
     args: &PackArgs,
     mut iostore: Vec<IoStorePackage>,
     mut legacy_paks: Vec<PathBuf>,
@@ -260,12 +281,12 @@ fn pack_discovered_items(
         archive_sources.push(extracted);
     }
 
-    pack_iostore_packages(aes_key, args, &iostore, default_output, game_paks_dir)?;
+    pack_iostore_packages(crypto, args, &iostore, default_output, game_paks_dir)?;
     for pak in &legacy_paks {
-        repack_legacy_pak(aes_key, args, pak, default_output)?;
+        repack_legacy_pak(crypto, args, pak, default_output)?;
     }
     for (path, name) in &archive_raw_dirs {
-        pack_raw_dir(aes_key, args, path, name, default_output)?;
+        pack_raw_dir(crypto, args, path, name, default_output)?;
     }
 
     drop(archive_sources);
@@ -308,7 +329,7 @@ fn collect_archive_source(
 }
 
 fn pack_iostore_packages(
-    aes_key: &retoc::AesKey,
+    crypto: &PackCrypto,
     args: &PackArgs,
     packages: &[IoStorePackage],
     default_output: &Path,
@@ -342,7 +363,7 @@ fn pack_iostore_packages(
         .map(|package| temp.path().join(package.stem()))
         .collect::<Vec<_>>();
     let extracted = iostore_ops::to_legacy_outputs(
-        aes_key,
+        &crypto.read_key,
         packages,
         outputs,
         &[],
@@ -353,7 +374,7 @@ fn pack_iostore_packages(
 
     for (package, extracted) in packages.iter().zip(extracted) {
         pack_raw_dir(
-            aes_key,
+            crypto,
             args,
             &extracted.output,
             &package.stem(),
@@ -364,7 +385,7 @@ fn pack_iostore_packages(
 }
 
 fn pack_iostore_package(
-    aes_key: &retoc::AesKey,
+    crypto: &PackCrypto,
     args: &PackArgs,
     package: &IoStorePackage,
     default_output: &Path,
@@ -384,7 +405,7 @@ fn pack_iostore_package(
     let temp = tempfile::tempdir().map_err(|e| format!("Failed to create temp dir: {e}"))?;
     let extracted_dir = temp.path().join(package.stem());
     iostore_ops::to_legacy_single(
-        aes_key,
+        &crypto.read_key,
         package,
         &extracted_dir,
         &[],
@@ -393,7 +414,7 @@ fn pack_iostore_package(
         true,
     )?;
     pack_raw_dir(
-        aes_key,
+        crypto,
         args,
         &extracted_dir,
         &package.stem(),
@@ -402,7 +423,7 @@ fn pack_iostore_package(
 }
 
 fn repack_legacy_pak(
-    aes_key: &retoc::AesKey,
+    crypto: &PackCrypto,
     args: &PackArgs,
     pak_path: &Path,
     default_output: &Path,
@@ -410,7 +431,7 @@ fn repack_legacy_pak(
     let temp = tempfile::tempdir().map_err(|e| format!("Failed to create temp dir: {e}"))?;
     unpack_legacy_pak_to_dir(pak_path, temp.path())?;
     pack_raw_dir(
-        aes_key,
+        crypto,
         args,
         temp.path(),
         &input_stem(pak_path),
@@ -419,7 +440,7 @@ fn repack_legacy_pak(
 }
 
 fn pack_raw_dir(
-    aes_key: &retoc::AesKey,
+    crypto: &PackCrypto,
     args: &PackArgs,
     input: &Path,
     raw_name: &str,
@@ -462,9 +483,12 @@ fn pack_raw_dir(
     println!("Packing {} to {}", input.display(), output_dir.display());
     let mut config = Config {
         container_header_version_override: None,
-        ..Default::default()
+        ..retoc_pack_config(
+            crypto.read_key.clone(),
+            crypto.write_key.clone(),
+            crypto.write_guid,
+        )
     };
-    config.aes_keys.insert(FGuid::default(), aes_key.clone());
     config.port_kawaii_physics = args.kawaii_physics;
     config.kawaii_physics_usmap = args.kawaii_physics_usmap.clone();
     config.kawaii_physics_force_rebuild = true;
