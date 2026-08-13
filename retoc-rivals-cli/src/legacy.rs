@@ -1,7 +1,7 @@
 use crate::cli::{FixKawaiiPhysicsArgs, PackArgs};
 use crate::config::{read_saved_state, retoc_config};
 use crate::kawaii_utils;
-use crate::pack::pack;
+use crate::pack::{pack, PackCrypto};
 use retoc::{
     action_manifest, action_to_legacy_batch, ActionManifest, ActionToLegacyBatch,
     ActionToLegacyBatchItem, Config,
@@ -11,10 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-pub fn fix_kawaii_physics(
-    aes_key: retoc::AesKey,
-    args: FixKawaiiPhysicsArgs,
-) -> Result<(), String> {
+pub fn fix_kawaii_physics(crypto: PackCrypto, args: FixKawaiiPhysicsArgs) -> Result<(), String> {
     if let Some(input) = args.input.as_deref() {
         return fix_kawaii_physics_directory(
             input,
@@ -49,7 +46,7 @@ pub fn fix_kawaii_physics(
     let extracted_temp =
         tempfile::tempdir().map_err(|e| format!("Failed to create temp directory: {e}"))?;
     let extracted_dirs = to_legacy_uasset_fast_batch(
-        aes_key.clone(),
+        crypto.read_key.clone(),
         &paks,
         extracted_temp.path(),
         &game_paks_dir,
@@ -65,7 +62,7 @@ pub fn fix_kawaii_physics(
             extracted_dir.display()
         );
         pack(
-            aes_key.clone(),
+            crypto.clone(),
             PackArgs {
                 input: vec![extracted_dir.clone()],
                 output: Some(args.output.clone()),

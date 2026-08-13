@@ -11,12 +11,27 @@ pub struct CliState {
 }
 
 pub fn retoc_config(aes_key: retoc::AesKey) -> Arc<Config> {
+    Arc::new(retoc_config_value(aes_key))
+}
+
+pub fn retoc_config_value(aes_key: retoc::AesKey) -> Config {
     let mut config = Config {
         container_header_version_override: None,
         ..Default::default()
     };
     config.aes_keys.insert(FGuid::default(), aes_key);
-    Arc::new(config)
+    config
+}
+
+pub fn retoc_pack_config(
+    aes_key: retoc::AesKey,
+    aes_key_override: Option<retoc::AesKey>,
+    encryption_guid: Option<FGuid>,
+) -> Config {
+    let mut config = retoc_config_value(aes_key);
+    config.write_aes_key = aes_key_override;
+    config.write_encryption_key_guid = encryption_guid;
+    config
 }
 
 pub fn read_saved_state() -> Result<CliState, String> {
