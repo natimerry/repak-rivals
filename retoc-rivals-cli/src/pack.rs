@@ -620,7 +620,7 @@ mod tests {
     use std::io::BufReader;
 
     #[test]
-    fn companion_pak_does_not_contain_chunknames() {
+    fn companion_pak_is_empty() {
         let temp = tempfile::tempdir().unwrap();
         let output = temp.path().join("mod.pak");
 

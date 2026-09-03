@@ -84,7 +84,7 @@ impl Default for InstallableMod {
     }
 }
 
-pub(crate) fn is_unsupported_chunknames_entry(mount_point: &str, entry: &str) -> bool {
+pub(crate) fn is_unsupported_companion_entry(mount_point: &str, entry: &str) -> bool {
     let mount_point = mount_point.replace('\\', "/");
     let entry = entry.replace('\\', "/");
     let full_path = if entry.starts_with("../../../") {
@@ -97,7 +97,9 @@ pub(crate) fn is_unsupported_chunknames_entry(mount_point: &str, entry: &str) ->
         )
     };
 
-    full_path.eq_ignore_ascii_case("../../../chunknames")
+    ["../../../chunknames", "../../../patched_files"]
+        .iter()
+        .any(|unsupported| full_path.eq_ignore_ascii_case(unsupported))
 }
 
 fn processable_asset_count<'a>(paths: impl IntoIterator<Item = &'a str>) -> usize {
@@ -793,17 +795,24 @@ pub fn map_dropped_file_to_mods(dropped_files: &[egui::DroppedFile]) -> Vec<Inst
 
 #[cfg(test)]
 mod tests {
-    use super::is_unsupported_chunknames_entry;
+    use super::is_unsupported_companion_entry;
 
     #[test]
-    fn detects_unsupported_chunknames_at_the_mounted_path() {
-        assert!(is_unsupported_chunknames_entry("../../../", "chunknames"));
-        assert!(is_unsupported_chunknames_entry("", "../../../chunknames"));
-        assert!(is_unsupported_chunknames_entry(
-            "..\\..\\..\\",
-            "CHUNKNAMES"
+    fn detects_unsupported_entries_at_the_mounted_path() {
+        assert!(is_unsupported_companion_entry("../../../", "chunknames"));
+        assert!(is_unsupported_companion_entry(
+            "../../../",
+            "patched_files"
         ));
-        assert!(!is_unsupported_chunknames_entry(
+        assert!(is_unsupported_companion_entry(
+            "",
+            "../../../chunknames"
+        ));
+        assert!(is_unsupported_companion_entry(
+            "..\\..\\..\\",
+            "PATCHED_FILES"
+        ));
+        assert!(!is_unsupported_companion_entry(
             "../../../Marvel/Content/",
             "chunknames"
         ));

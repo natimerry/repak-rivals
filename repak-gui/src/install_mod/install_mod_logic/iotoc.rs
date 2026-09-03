@@ -357,8 +357,8 @@ pub fn convert_directory_to_iostore(
         )))
     })?;
 
-    // IoStore mods still need a companion pak, but it must not contain the now-unsupported
-    // ../../../chunknames entry.
+    // IoStore mods still need a companion pak, but it must not contain unsupported
+    // synthetic entries such as ../../../chunknames or ../../../patched_files.
 
     let output_file = File::create(mod_dir.join(pak_name))?;
 

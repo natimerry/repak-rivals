@@ -249,7 +249,7 @@ Output rules:
 | --- | --- |
 | suffix | appends `_9999999_P` unless `--no-mod-suffix` |
 | generated files | `.pak`, `.utoc`, `.ucas` |
-| generated `.pak` | fake pak containing `chunknames` |
+| generated `.pak` | empty companion pak (unsupported `../../../chunknames` and `../../../patched_files` entries are not written) |
 | IoStore input without transform flags | copied/installed, not converted |
 | IoStore input with `--obfuscate` | to-legacy temp extraction, re-pack with obfuscated IoStore |
 | IoStore input with non-default `--compression` | to-legacy temp extraction, re-pack with selected compression |

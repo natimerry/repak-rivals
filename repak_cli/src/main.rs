@@ -527,6 +527,7 @@ fn pack(aes_key: Option<aes::Aes256>, args: ActionPack) -> Result<(), repak::Err
     println!("Found {:#?} uasset files to path", &uasset_files);
 
     let patched_cache_file = input_path.join("patched_files");
+    paths.retain(|path| path != &patched_cache_file);
     let file = OpenOptions::new()
         .read(true) // Allow reading
         .write(true) // Allow writing
@@ -539,8 +540,6 @@ fn pack(aes_key: Option<aes::Aes256>, args: ActionPack) -> Result<(), repak::Err
         .collect::<Vec<_>>();
 
     let mut cache_writer = BufWriter::new(&file);
-
-    paths.push(patched_cache_file);
 
     if args.restore_assets {
         for uassetfile in &uasset_files {

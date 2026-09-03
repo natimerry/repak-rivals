@@ -19,22 +19,22 @@ use super::iotoc::convert_directory_to_iostore;
 
 const MOD_NAME_SUFFIX: &str = "_9999999_P";
 
-pub fn pak_contains_unsupported_chunknames(path: &Path) -> Result<bool, repak::Error> {
+pub fn pak_contains_unsupported_entries(path: &Path) -> Result<bool, repak::Error> {
     let reader = repak::PakBuilder::new()
         .key(AES_KEY.clone().0)
         .reader(&mut BufReader::new(File::open(path)?))?;
     Ok(reader.files().iter().any(|entry| {
-        crate::install_mod::is_unsupported_chunknames_entry(reader.mount_point(), entry)
+        crate::install_mod::is_unsupported_companion_entry(reader.mount_point(), entry)
     }))
 }
 
-pub fn rewrite_unsupported_chunknames_pak(path: &Path) -> Result<bool, repak::Error> {
+pub fn rewrite_unsupported_companion_pak(path: &Path) -> Result<bool, repak::Error> {
     let (version, mount_point, path_hash_seed) = {
         let reader = repak::PakBuilder::new()
             .key(AES_KEY.clone().0)
             .reader(&mut BufReader::new(File::open(path)?))?;
         if !reader.files().iter().any(|entry| {
-            crate::install_mod::is_unsupported_chunknames_entry(reader.mount_point(), entry)
+            crate::install_mod::is_unsupported_companion_entry(reader.mount_point(), entry)
         }) {
             return Ok(false);
         }
@@ -90,7 +90,7 @@ pub fn extract_pak_to_dir(pak: &InstallableMod, install_dir: PathBuf) -> Result<
         .files()
         .into_iter()
         .filter(|entry| {
-            !crate::install_mod::is_unsupported_chunknames_entry(pak_reader.mount_point(), entry)
+            !crate::install_mod::is_unsupported_companion_entry(pak_reader.mount_point(), entry)
         })
         .map(|entry| {
             let full_path = mount_point.join(&entry);
@@ -229,13 +229,13 @@ pub fn repak_dir(
 
 #[cfg(test)]
 mod tests {
-    use super::{pak_contains_unsupported_chunknames, rewrite_unsupported_chunknames_pak};
+    use super::{pak_contains_unsupported_entries, rewrite_unsupported_companion_pak};
     use crate::install_mod::AES_KEY;
     use repak::Version;
     use std::fs::File;
 
     #[test]
-    fn rewrites_only_the_pak_index_without_chunknames() {
+    fn rewrites_only_the_pak_index_without_unsupported_entries() {
         let temp = tempfile::tempdir().unwrap();
         let pak_path = temp.path().join("mod.pak");
         let mut writer = repak::PakBuilder::new().key(AES_KEY.clone().0).writer(
@@ -247,11 +247,14 @@ mod tests {
         writer
             .write_file("chunknames", false, b"asset list")
             .unwrap();
+        writer
+            .write_file("patched_files", false, b"patched asset list")
+            .unwrap();
         writer.write_index().unwrap();
 
-        assert!(pak_contains_unsupported_chunknames(&pak_path).unwrap());
-        assert!(rewrite_unsupported_chunknames_pak(&pak_path).unwrap());
-        assert!(!pak_contains_unsupported_chunknames(&pak_path).unwrap());
-        assert!(!rewrite_unsupported_chunknames_pak(&pak_path).unwrap());
+        assert!(pak_contains_unsupported_entries(&pak_path).unwrap());
+        assert!(rewrite_unsupported_companion_pak(&pak_path).unwrap());
+        assert!(!pak_contains_unsupported_entries(&pak_path).unwrap());
+        assert!(!rewrite_unsupported_companion_pak(&pak_path).unwrap());
     }
 }

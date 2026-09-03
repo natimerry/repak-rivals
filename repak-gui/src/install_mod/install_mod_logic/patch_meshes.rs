@@ -77,6 +77,7 @@ pub fn mesh_patch(paths: &mut Vec<PathBuf>, mod_dir: &PathBuf) -> Result<(), rep
     info!("Found {:#?} uasset files to path", &uasset_files);
 
     let patched_cache_file = mod_dir.join("patched_files");
+    paths.retain(|path| path != &patched_cache_file);
     info!("Patching files...");
     let file = OpenOptions::new()
         .read(true) // Allow reading
@@ -92,7 +93,6 @@ pub fn mesh_patch(paths: &mut Vec<PathBuf>, mod_dir: &PathBuf) -> Result<(), rep
 
     let mut cache_writer = BufWriter::new(&file);
 
-    paths.push(patched_cache_file);
     let print_logger = PrintLogger;
     let mut fixer = PatchFixer {
         logger: print_logger,

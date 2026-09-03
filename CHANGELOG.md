@@ -1,12 +1,13 @@
 # Changelog
 
-## Version 3.6.0
+## Version 3.6.1
 
 ### Changes
 - Fix some Hidden material bugs.
 - Fix material tag exports breaking customisation and beach skins.
 - Minor perfomance fixes.
-- Stop writing the unsupported `../../../chunknames` pak entry, offer to rewrite affected installed paks at GUI startup, and automatically rewrite newly installed affected paks.
+- Add optional custom AES-key and encryption-GUID overrides for generated IoStore containers.
+- Stop writing the unsupported `../../../chunknames` and `../../../patched_files` pak entries, offer to rewrite affected installed paks at GUI startup, and automatically rewrite newly installed affected paks.
 
 ## Version 3.4.1
 

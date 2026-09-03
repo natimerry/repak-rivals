@@ -19,7 +19,7 @@ use eframe::egui::{
 };
 use egui_flex::{item, Flex, FlexAlign};
 use install_mod::install_mod_logic::pak_files::{
-    extract_pak_to_dir, pak_contains_unsupported_chunknames, rewrite_unsupported_chunknames_pak,
+    extract_pak_to_dir, pak_contains_unsupported_entries, rewrite_unsupported_companion_pak,
 };
 use install_mod::install_mod_logic::{
     fix_installed_iostore_kawaii_physics, patch_installed_iostore_default_hidden_materials,
@@ -353,7 +353,7 @@ impl RepakModManager {
         }
     }
 
-    fn repair_unsupported_chunknames_on_startup(&self) {
+    fn repair_unsupported_companion_paks_on_startup(&self) {
         if !self.game_path.exists() {
             return;
         }
@@ -367,10 +367,10 @@ impl RepakModManager {
             .filter(|path| {
                 path.with_extension("utoc").exists() && path.with_extension("ucas").exists()
             })
-            .filter(|path| match pak_contains_unsupported_chunknames(path) {
+            .filter(|path| match pak_contains_unsupported_entries(path) {
                 Ok(contains_entry) => contains_entry,
                 Err(error) => {
-                    warn!(file = %path.display(), error = %error, "Could not check companion pak for chunknames");
+                    warn!(file = %path.display(), error = %error, "Could not check companion pak for unsupported entries");
                     false
                 }
             })
@@ -384,9 +384,9 @@ impl RepakModManager {
             rfd::MessageDialog::new()
                 .set_buttons(MessageButtons::YesNo)
                 .set_level(rfd::MessageLevel::Warning)
-                .set_title("Unsupported chunknames entry")
+                .set_title("Unsupported companion pak entries")
                 .set_description(format!(
-                    "../../../chunknames is now unsupported as of 3rd September 2026 and causes anti-cheat crashes. {} installed mod(s) contain it. Do you want to rewrite the affected .pak file(s) and fix it?\n\nThe IoStore .utoc and .ucas files will not be rebuilt.",
+                    "../../../chunknames and ../../../patched_files are now unsupported as of 3rd September 2026 and cause anti-cheat crashes. {} installed mod(s) contain one or both entries. Do you want to rewrite the affected .pak file(s) and fix them?\n\nThe IoStore .utoc and .ucas files will not be rebuilt.",
                     affected.len()
                 ))
                 .show(),
@@ -399,9 +399,9 @@ impl RepakModManager {
 
         let mut failures = Vec::new();
         for path in affected {
-            match rewrite_unsupported_chunknames_pak(&path) {
+            match rewrite_unsupported_companion_pak(&path) {
                 Ok(true) => {
-                    info!(file = %path.display(), "Rewrote companion pak without chunknames")
+                    info!(file = %path.display(), "Rewrote companion pak without unsupported entries")
                 }
                 Ok(false) => {}
                 Err(error) => {
@@ -1764,7 +1764,7 @@ impl RepakModManager {
         };
 
         if let Ok(ref mut shit) = shit {
-            shit.repair_unsupported_chunknames_on_startup();
+            shit.repair_unsupported_companion_paks_on_startup();
             shit.restart_game_path_watcher();
             shit.collect_pak_files();
             if persist_config {
