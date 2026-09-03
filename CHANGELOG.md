@@ -1,5 +1,10 @@
 # Changelog
 
+## Version 3.6.2
+
+### Changes
+- Safely remove only the unsupported `../../../chunknames` and `../../../patched_files` entries when repairing a companion pak, preserving audio and all other valid pak content.
+
 ## Version 3.6.1
 
 ### Changes

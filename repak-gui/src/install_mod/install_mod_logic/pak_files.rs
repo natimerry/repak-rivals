@@ -9,7 +9,7 @@ use rayon::iter::ParallelIterator;
 use repak::Version;
 use std::fs;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Write};
+use std::io::{BufReader, BufWriter, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
@@ -29,37 +29,32 @@ pub fn pak_contains_unsupported_entries(path: &Path) -> Result<bool, repak::Erro
 }
 
 pub fn rewrite_unsupported_companion_pak(path: &Path) -> Result<bool, repak::Error> {
-    let (version, mount_point, path_hash_seed) = {
-        let reader = repak::PakBuilder::new()
-            .key(AES_KEY.clone().0)
-            .reader(&mut BufReader::new(File::open(path)?))?;
-        if !reader.files().iter().any(|entry| {
+    let reader = repak::PakBuilder::new()
+        .key(AES_KEY.clone().0)
+        .reader(&mut BufReader::new(File::open(path)?))?;
+    let unsupported_entries = reader
+        .files()
+        .into_iter()
+        .filter(|entry| {
             crate::install_mod::is_unsupported_companion_entry(reader.mount_point(), entry)
-        }) {
-            return Ok(false);
-        }
-        (
-            reader.version(),
-            reader.mount_point().to_string(),
-            reader.path_hash_seed(),
-        )
-    };
+        })
+        .collect::<Vec<_>>();
+    if unsupported_entries.is_empty() {
+        return Ok(false);
+    }
 
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let mut replacement = tempfile::NamedTempFile::new_in(parent).map_err(repak::Error::Io)?;
-    repak::PakBuilder::new()
-        .key(AES_KEY.clone().0)
-        .writer(
-            replacement.as_file_mut(),
-            version,
-            mount_point,
-            path_hash_seed,
-        )
-        .write_index()?;
-    replacement
-        .as_file_mut()
-        .sync_all()
-        .map_err(repak::Error::Io)?;
+    std::io::copy(&mut File::open(path)?, replacement.as_file_mut())?;
+
+    let mut writer = reader.into_pakwriter(replacement.as_file_mut())?;
+    for entry in unsupported_entries {
+        writer.remove_entry(&entry);
+    }
+    let replacement_file = writer.write_index()?;
+    let replacement_len = replacement_file.stream_position()?;
+    replacement_file.set_len(replacement_len)?;
+    replacement_file.sync_all()?;
     replacement
         .persist(path)
         .map_err(|error| repak::Error::Io(error.error))?;
@@ -250,11 +245,29 @@ mod tests {
         writer
             .write_file("patched_files", false, b"patched asset list")
             .unwrap();
+        let audio_path = "Marvel/Content/WwiseAudio/Windows/voice.wem";
+        let audio_data = b"valid audio data";
+        writer.write_file(audio_path, false, audio_data).unwrap();
         writer.write_index().unwrap();
 
         assert!(pak_contains_unsupported_entries(&pak_path).unwrap());
         assert!(rewrite_unsupported_companion_pak(&pak_path).unwrap());
         assert!(!pak_contains_unsupported_entries(&pak_path).unwrap());
         assert!(!rewrite_unsupported_companion_pak(&pak_path).unwrap());
+
+        let reader = repak::PakBuilder::new()
+            .key(AES_KEY.clone().0)
+            .reader(&mut std::io::BufReader::new(File::open(&pak_path).unwrap()))
+            .unwrap();
+        assert_eq!(reader.files(), vec![audio_path.to_string()]);
+        assert_eq!(
+            reader
+                .get(
+                    audio_path,
+                    &mut std::io::BufReader::new(File::open(&pak_path).unwrap()),
+                )
+                .unwrap(),
+            audio_data
+        );
     }
 }

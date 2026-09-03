@@ -800,14 +800,8 @@ mod tests {
     #[test]
     fn detects_unsupported_entries_at_the_mounted_path() {
         assert!(is_unsupported_companion_entry("../../../", "chunknames"));
-        assert!(is_unsupported_companion_entry(
-            "../../../",
-            "patched_files"
-        ));
-        assert!(is_unsupported_companion_entry(
-            "",
-            "../../../chunknames"
-        ));
+        assert!(is_unsupported_companion_entry("../../../", "patched_files"));
+        assert!(is_unsupported_companion_entry("", "../../../chunknames"));
         assert!(is_unsupported_companion_entry(
             "..\\..\\..\\",
             "PATCHED_FILES"

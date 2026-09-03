@@ -297,6 +297,11 @@ impl<W: Write + Seek> PakWriter<W> {
         }
     }
 
+    /// Removes an entry from the pak index without touching the entry's stored data.
+    pub fn remove_entry(&mut self, path: &str) -> bool {
+        self.pak.index.entries.remove(path).is_some()
+    }
+
     pub fn write_entry<D: AsRef<[u8]>>(
         &mut self,
         path: String,
