@@ -84,6 +84,22 @@ impl Default for InstallableMod {
     }
 }
 
+pub(crate) fn is_unsupported_chunknames_entry(mount_point: &str, entry: &str) -> bool {
+    let mount_point = mount_point.replace('\\', "/");
+    let entry = entry.replace('\\', "/");
+    let full_path = if entry.starts_with("../../../") {
+        entry
+    } else {
+        format!(
+            "{}/{}",
+            mount_point.trim_end_matches('/'),
+            entry.trim_start_matches('/')
+        )
+    };
+
+    full_path.eq_ignore_ascii_case("../../../chunknames")
+}
+
 fn processable_asset_count<'a>(paths: impl IntoIterator<Item = &'a str>) -> usize {
     paths
         .into_iter()
@@ -763,8 +779,7 @@ pub fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
 }
 
 pub fn map_paths_to_mods(paths: &[PathBuf]) -> Vec<InstallableMod> {
-    let installable_mods = map_to_mods_internal(paths);
-    installable_mods
+    map_to_mods_internal(paths)
 }
 
 pub fn map_dropped_file_to_mods(dropped_files: &[egui::DroppedFile]) -> Vec<InstallableMod> {
@@ -773,6 +788,24 @@ pub fn map_dropped_file_to_mods(dropped_files: &[egui::DroppedFile]) -> Vec<Inst
         .map(|f| f.path.clone().unwrap())
         .collect::<Vec<_>>();
 
-    let installable_mods = map_to_mods_internal(&paths);
-    installable_mods
+    map_to_mods_internal(&paths)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_unsupported_chunknames_entry;
+
+    #[test]
+    fn detects_unsupported_chunknames_at_the_mounted_path() {
+        assert!(is_unsupported_chunknames_entry("../../../", "chunknames"));
+        assert!(is_unsupported_chunknames_entry("", "../../../chunknames"));
+        assert!(is_unsupported_chunknames_entry(
+            "..\\..\\..\\",
+            "CHUNKNAMES"
+        ));
+        assert!(!is_unsupported_chunknames_entry(
+            "../../../Marvel/Content/",
+            "chunknames"
+        ));
+    }
 }

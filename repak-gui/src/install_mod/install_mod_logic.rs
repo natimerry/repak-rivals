@@ -5,7 +5,7 @@ pub mod patch_meshes;
 
 use crate::install_mod::InstallableMod;
 use iotoc::{convert_directory_to_iostore, to_legacy_uasset_fast_with_progress};
-use pak_files::create_repak_from_pak;
+use pak_files::{create_repak_from_pak, rewrite_unsupported_chunknames_pak};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::mpsc::Sender;
@@ -313,6 +313,16 @@ pub fn install_mods_in_viewport(
                         error = ?e,
                         "Unable to copy file"
                     );
+                }
+            }
+            let installed_pak = mod_directory.join(format!("{normalized_mod_name}.pak"));
+            match rewrite_unsupported_chunknames_pak(&installed_pak) {
+                Ok(true) => {
+                    info!(mod_name = %installable_mod.mod_name, "Rewrote installed companion pak without chunknames")
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    error!(mod_name = %installable_mod.mod_name, error = %e, "Failed to rewrite installed companion pak")
                 }
             }
             installed_mods_ptr.fetch_add(
