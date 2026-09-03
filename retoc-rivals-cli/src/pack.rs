@@ -5,10 +5,7 @@ use crate::iostore_ops;
 use crate::kawaii_utils;
 use crate::source::{classify_path, scan_directory_packages, IoStorePackage, PackageSource};
 use crate::unpack::unpack_legacy_pak_to_dir;
-use crate::util::{
-    collect_files, ensure_mod_name_suffix, pak_aes_key, parse_path_hash_seed, repak_compression,
-    retoc_compression,
-};
+use crate::util::{ensure_mod_name_suffix, pak_aes_key, parse_path_hash_seed, retoc_compression};
 use retoc::{action_to_zen, ActionToZen, Config, EngineVersion};
 use std::fs::{self, File};
 use std::io::BufWriter;
@@ -496,52 +493,28 @@ fn pack_raw_dir(
     config.kawaii_physics_default_hidden_material_bitmaps = default_hidden_material_bitmaps(args);
     action_to_zen(action, Arc::new(config)).map_err(|e| format!("Pack failed: {e:#}"))?;
 
-    write_chunknames_pak(
-        input,
+    write_companion_pak(
         &output_dir.join(format!("{mod_name}.pak")),
         &args.mount_point,
         &args.path_hash_seed,
-        args.compression,
     )
 }
 
-fn write_chunknames_pak(
-    input: &Path,
+fn write_companion_pak(
     output: &Path,
     mount_point: &str,
     path_hash_seed: &str,
-    compression: crate::cli::CompressionArg,
 ) -> Result<(), String> {
-    let mut paths = Vec::new();
-    collect_files(&mut paths, input).map_err(|e| format!("Failed to scan input files: {e}"))?;
-    let mut rel_paths = paths
-        .iter()
-        .map(|path| {
-            path.strip_prefix(input)
-                .map(|path| path.to_string_lossy().replace('\\', "/"))
-                .map_err(|e| format!("File is not in input directory: {} ({e})", path.display()))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    rel_paths.sort();
-
     let seed = parse_path_hash_seed(path_hash_seed)?;
-    let builder = repak::PakBuilder::new()
-        .compression(repak_compression(compression))
-        .key(pak_aes_key()?.0);
+    let builder = repak::PakBuilder::new().key(pak_aes_key()?.0);
     let file =
         File::create(output).map_err(|e| format!("Failed to create {}: {e}", output.display()))?;
-    let mut pak = builder.writer(
+    let pak = builder.writer(
         BufWriter::new(file),
         repak::Version::V11,
         mount_point.to_string(),
         Some(seed),
     );
-    let entry = pak
-        .entry_builder()
-        .build_entry(true, rel_paths.join("\n").into_bytes(), "chunknames")
-        .map_err(|e| format!("Failed to build chunknames entry: {e}"))?;
-    pak.write_entry("chunknames".to_string(), entry)
-        .map_err(|e| format!("Failed to write chunknames entry: {e}"))?;
     pak.write_index()
         .map_err(|e| format!("Failed to write pak index: {e}"))?;
     println!("Wrote {}", output.display());
@@ -636,5 +609,27 @@ fn archive_payload_root(root: &Path) -> PathBuf {
         dirs.pop().unwrap()
     } else {
         root.to_path_buf()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::write_companion_pak;
+    use crate::util::pak_aes_key;
+    use std::fs::File;
+    use std::io::BufReader;
+
+    #[test]
+    fn companion_pak_does_not_contain_chunknames() {
+        let temp = tempfile::tempdir().unwrap();
+        let output = temp.path().join("mod.pak");
+
+        write_companion_pak(&output, "../../../", "00000000").unwrap();
+
+        let reader = repak::PakBuilder::new()
+            .key(pak_aes_key().unwrap().0)
+            .reader(&mut BufReader::new(File::open(output).unwrap()))
+            .unwrap();
+        assert!(reader.files().is_empty());
     }
 }

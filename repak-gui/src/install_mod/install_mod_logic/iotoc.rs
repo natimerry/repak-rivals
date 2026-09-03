@@ -2,9 +2,6 @@ use crate::install_mod::install_mod_logic::pak_files::repak_dir;
 use crate::install_mod::install_mod_logic::patch_meshes;
 use crate::install_mod::{InstallableMod, AES_KEY};
 use crate::utils::collect_files;
-use path_slash::PathExt;
-use rayon::iter::IntoParallelRefIterator;
-use rayon::iter::ParallelIterator;
 use repak::Version;
 use retoc::*;
 use std::collections::HashSet;
@@ -360,34 +357,16 @@ pub fn convert_directory_to_iostore(
         )))
     })?;
 
-    // NOW WE CREATE THE FAKE PAK FILE WITH THE CONTENTS BEING A TEXT FILE LISTING ALL CHUNKNAMES
+    // IoStore mods still need a companion pak, but it must not contain the now-unsupported
+    // ../../../chunknames entry.
 
     let output_file = File::create(mod_dir.join(pak_name))?;
-
-    let rel_paths = paths
-        .par_iter()
-        .map(|p| {
-            let rel = p.strip_prefix(&to_pak_dir).map_err(|e| {
-                repak::Error::Io(std::io::Error::other(format!(
-                    "File is not in input directory: {} ({e})",
-                    p.display()
-                )))
-            })?;
-            let rel = rel.to_slash().ok_or_else(|| {
-                repak::Error::Io(std::io::Error::other(format!(
-                    "Failed to convert path to slash form: {}",
-                    rel.display()
-                )))
-            })?;
-            Ok(rel.to_string())
-        })
-        .collect::<Result<Vec<_>, repak::Error>>()?;
 
     let builder = repak::PakBuilder::new()
         .compression(vec![pak.compression])
         .key(AES_KEY.clone().0);
 
-    let mut pak_writer = builder.writer(
+    let pak_writer = builder.writer(
         BufWriter::new(output_file),
         Version::V11,
         pak.mount_point.clone(),
@@ -398,25 +377,11 @@ pub fn convert_directory_to_iostore(
             )))
         })?),
     );
-    let entry_builder = pak_writer.entry_builder();
-
-    let rel_paths_bytes: Vec<u8> = rel_paths.join("\n").into_bytes();
-    let entry = entry_builder
-        .build_entry(true, rel_paths_bytes, "chunknames")
-        .map_err(|e| {
-            repak::Error::Io(std::io::Error::other(format!(
-                "Failed to build chunknames entry: {e}"
-            )))
-        })?;
-
-    pak_writer.write_entry("chunknames".to_string(), entry)?;
     pak_writer.write_index()?;
 
     log::info!("Wrote pak file successfully");
     finish_progress_phase(&packed_files_count, base_progress, phase_units);
     Ok(())
-
-    // now generate the fake pak file
 }
 
 #[instrument(skip_all)]

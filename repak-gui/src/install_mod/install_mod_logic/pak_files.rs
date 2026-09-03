@@ -19,6 +19,53 @@ use super::iotoc::convert_directory_to_iostore;
 
 const MOD_NAME_SUFFIX: &str = "_9999999_P";
 
+pub fn pak_contains_unsupported_chunknames(path: &Path) -> Result<bool, repak::Error> {
+    let reader = repak::PakBuilder::new()
+        .key(AES_KEY.clone().0)
+        .reader(&mut BufReader::new(File::open(path)?))?;
+    Ok(reader.files().iter().any(|entry| {
+        crate::install_mod::is_unsupported_chunknames_entry(reader.mount_point(), entry)
+    }))
+}
+
+pub fn rewrite_unsupported_chunknames_pak(path: &Path) -> Result<bool, repak::Error> {
+    let (version, mount_point, path_hash_seed) = {
+        let reader = repak::PakBuilder::new()
+            .key(AES_KEY.clone().0)
+            .reader(&mut BufReader::new(File::open(path)?))?;
+        if !reader.files().iter().any(|entry| {
+            crate::install_mod::is_unsupported_chunknames_entry(reader.mount_point(), entry)
+        }) {
+            return Ok(false);
+        }
+        (
+            reader.version(),
+            reader.mount_point().to_string(),
+            reader.path_hash_seed(),
+        )
+    };
+
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut replacement = tempfile::NamedTempFile::new_in(parent).map_err(repak::Error::Io)?;
+    repak::PakBuilder::new()
+        .key(AES_KEY.clone().0)
+        .writer(
+            replacement.as_file_mut(),
+            version,
+            mount_point,
+            path_hash_seed,
+        )
+        .write_index()?;
+    replacement
+        .as_file_mut()
+        .sync_all()
+        .map_err(repak::Error::Io)?;
+    replacement
+        .persist(path)
+        .map_err(|error| repak::Error::Io(error.error))?;
+    Ok(true)
+}
+
 fn ensure_mod_name_suffix(name: &str) -> String {
     if name.ends_with(MOD_NAME_SUFFIX) {
         name.to_string()
@@ -42,6 +89,9 @@ pub fn extract_pak_to_dir(pak: &InstallableMod, install_dir: PathBuf) -> Result<
     let entries = pak_reader
         .files()
         .into_iter()
+        .filter(|entry| {
+            !crate::install_mod::is_unsupported_chunknames_entry(pak_reader.mount_point(), entry)
+        })
         .map(|entry| {
             let full_path = mount_point.join(&entry);
             let out_path =
@@ -164,20 +214,10 @@ pub fn repak_dir(
         })
         .collect::<Vec<_>>();
 
-    let mut rel_paths = vec![];
     for (path, entry) in partial_entry {
         debug!("Writing: {}", path);
-        pak_writer.write_entry(path.clone(), entry)?;
-        rel_paths.push(path);
+        pak_writer.write_entry(path, entry)?;
     }
-
-    let rel_paths_bytes: Vec<u8> = rel_paths.join("\n").into_bytes();
-
-    let entry = entry_builder
-        .build_entry(true, rel_paths_bytes, "chunknames")
-        .expect("Failed to build entry");
-
-    pak_writer.write_entry("chunknames".to_string(), entry)?;
     pak_writer.write_index()?;
 
     log::info!("Wrote pak file successfully");
@@ -185,4 +225,33 @@ pub fn repak_dir(
         base_progress.saturating_add(pak.total_files.max(1).min(i32::MAX as usize) as i32);
     installed_mods_ptr.fetch_max(minimum_progress, Ordering::SeqCst);
     Ok::<(), repak::Error>(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{pak_contains_unsupported_chunknames, rewrite_unsupported_chunknames_pak};
+    use crate::install_mod::AES_KEY;
+    use repak::Version;
+    use std::fs::File;
+
+    #[test]
+    fn rewrites_only_the_pak_index_without_chunknames() {
+        let temp = tempfile::tempdir().unwrap();
+        let pak_path = temp.path().join("mod.pak");
+        let mut writer = repak::PakBuilder::new().key(AES_KEY.clone().0).writer(
+            File::create(&pak_path).unwrap(),
+            Version::V11,
+            "../../../".to_string(),
+            Some(0),
+        );
+        writer
+            .write_file("chunknames", false, b"asset list")
+            .unwrap();
+        writer.write_index().unwrap();
+
+        assert!(pak_contains_unsupported_chunknames(&pak_path).unwrap());
+        assert!(rewrite_unsupported_chunknames_pak(&pak_path).unwrap());
+        assert!(!pak_contains_unsupported_chunknames(&pak_path).unwrap());
+        assert!(!rewrite_unsupported_chunknames_pak(&pak_path).unwrap());
+    }
 }

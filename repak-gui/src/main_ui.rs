@@ -18,7 +18,9 @@ use eframe::egui::{
     ScrollArea, Stroke, Style, TextEdit, TextStyle, Theme,
 };
 use egui_flex::{item, Flex, FlexAlign};
-use install_mod::install_mod_logic::pak_files::extract_pak_to_dir;
+use install_mod::install_mod_logic::pak_files::{
+    extract_pak_to_dir, pak_contains_unsupported_chunknames, rewrite_unsupported_chunknames_pak,
+};
 use install_mod::install_mod_logic::{
     fix_installed_iostore_kawaii_physics, patch_installed_iostore_default_hidden_materials,
     register_kawaii_runtime_error_sender,
@@ -348,6 +350,74 @@ impl RepakModManager {
 
         if let Some(paks_path) = match_exact_paks_suffix(path) {
             self.game_chunk_path = Some(paks_path)
+        }
+    }
+
+    fn repair_unsupported_chunknames_on_startup(&self) {
+        if !self.game_path.exists() {
+            return;
+        }
+
+        let affected = WalkDir::new(&self.game_path)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_file())
+            .map(|entry| entry.into_path())
+            .filter(|path| mod_file_state(path).is_some())
+            .filter(|path| {
+                path.with_extension("utoc").exists() && path.with_extension("ucas").exists()
+            })
+            .filter(|path| match pak_contains_unsupported_chunknames(path) {
+                Ok(contains_entry) => contains_entry,
+                Err(error) => {
+                    warn!(file = %path.display(), error = %error, "Could not check companion pak for chunknames");
+                    false
+                }
+            })
+            .collect::<Vec<_>>();
+
+        if affected.is_empty() {
+            return;
+        }
+
+        let should_rewrite = matches!(
+            rfd::MessageDialog::new()
+                .set_buttons(MessageButtons::YesNo)
+                .set_level(rfd::MessageLevel::Warning)
+                .set_title("Unsupported chunknames entry")
+                .set_description(format!(
+                    "../../../chunknames is now unsupported as of 3rd September 2026 and causes anti-cheat crashes. {} installed mod(s) contain it. Do you want to rewrite the affected .pak file(s) and fix it?\n\nThe IoStore .utoc and .ucas files will not be rebuilt.",
+                    affected.len()
+                ))
+                .show(),
+            rfd::MessageDialogResult::Yes
+        );
+
+        if !should_rewrite {
+            return;
+        }
+
+        let mut failures = Vec::new();
+        for path in affected {
+            match rewrite_unsupported_chunknames_pak(&path) {
+                Ok(true) => {
+                    info!(file = %path.display(), "Rewrote companion pak without chunknames")
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    error!(file = %path.display(), error = %error, "Failed to rewrite companion pak");
+                    failures.push(format!("{}: {error}", path.display()));
+                }
+            }
+        }
+
+        if !failures.is_empty() {
+            rfd::MessageDialog::new()
+                .set_buttons(MessageButtons::Ok)
+                .set_level(rfd::MessageLevel::Error)
+                .set_title("Some paks could not be fixed")
+                .set_description(failures.join("\n"))
+                .show();
         }
     }
 
@@ -1694,6 +1764,7 @@ impl RepakModManager {
         };
 
         if let Ok(ref mut shit) = shit {
+            shit.repair_unsupported_chunknames_on_startup();
             shit.restart_game_path_watcher();
             shit.collect_pak_files();
             if persist_config {
