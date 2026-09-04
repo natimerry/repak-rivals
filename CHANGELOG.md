@@ -1,4 +1,8 @@
 # Changelog
+## Version 3.7.4
+- Fix non steam launcher chunkpath detection
+- Strip `desktop.ini` entries for audio mod to disable kicks when in use with pystubber.
+- Added setting to disable creation of backups.
 
 ## Version 3.6.2
 
