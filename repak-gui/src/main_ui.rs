@@ -7,8 +7,8 @@ use crate::install_mod::{
 };
 use crate::ios_widget;
 use crate::utils::{
-    find_marvel_rivals, get_current_pak_characteristics, latest_depot_usmap_path,
-    match_exact_paks_suffix, mods_need_kawaii_mapping,
+    find_marvel_rivals, find_rivals_paks_ancestor, get_current_pak_characteristics,
+    latest_depot_usmap_path, mods_need_kawaii_mapping,
 };
 use crate::utoc_utils::{is_iostore_obfuscated, read_utoc_package_names};
 use crate::welcome::ShowWelcome;
@@ -368,14 +368,7 @@ impl RepakModManager {
     }
 
     fn set_game_pakchunk_path(&mut self) {
-        self.game_chunk_path = None;
-        let Some(path) = self.game_path.parent() else {
-            return;
-        };
-
-        if let Some(paks_path) = match_exact_paks_suffix(path) {
-            self.game_chunk_path = Some(paks_path)
-        }
+        self.game_chunk_path = find_rivals_paks_ancestor(&self.game_path);
     }
 
     fn repair_unsupported_companion_paks_on_startup(&self) {
