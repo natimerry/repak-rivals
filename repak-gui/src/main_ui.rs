@@ -22,8 +22,8 @@ use install_mod::install_mod_logic::pak_files::{
     extract_pak_to_dir, pak_contains_unsupported_entries, rewrite_unsupported_companion_pak,
 };
 use install_mod::install_mod_logic::{
-    fix_installed_iostore_kawaii_physics, patch_installed_iostore_default_hidden_materials,
-    register_kawaii_runtime_error_sender,
+    encrypt_installed_iostore_mod, fix_installed_iostore_kawaii_physics,
+    patch_installed_iostore_default_hidden_materials, register_kawaii_runtime_error_sender,
 };
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use path_clean::PathClean;
@@ -48,6 +48,8 @@ const RED_THEME_COLOR: Color32 = Color32::from_rgb(255, 31, 75);
 const DEFAULT_HIDDEN_MATERIAL_BITMAPS: [u64; 3] = [0x0FFF0000, 0x0FFF0000, 0x0EFB0000];
 const DEFAULT_HIDDEN_MATERIAL_CREATOR_SLOTS: usize = 32;
 const MAX_DEFAULT_HIDDEN_MATERIAL_SLOTS: usize = 64;
+const ENCRYPTION_REQUIRED_MESSAGE: &str = "these mods touch files outside of the /Game/Marvel/Characters prefix so they wont load without encryption";
+const LEGACY_PAK_MESSAGE: &str = "Wait for bypass xo";
 // use eframe::egui::WidgetText::RichText;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -121,6 +123,12 @@ pub struct RepakModManager {
     kawaii_runtime_receiver: Option<Receiver<String>>,
     #[serde(skip)]
     kawaii_runtime_state: KawaiiRuntimeUiState,
+    #[serde(skip)]
+    encryption_state: EncryptionUiState,
+    #[serde(skip)]
+    encryption_prompt_evaluated: bool,
+    #[serde(skip)]
+    encryption_worker: Option<thread::JoinHandle<Result<(), String>>>,
 
     #[serde(skip)]
     welcome_screen: Option<ShowWelcome>,
@@ -185,6 +193,8 @@ struct ModEntry {
     category: String,
     characteristic: String,
     obfuscated: String,
+    encrypted: bool,
+    outside_characters: bool,
     metadata_pending: bool,
     file_count: Option<usize>,
 }
@@ -202,6 +212,8 @@ struct ModMetadataCacheEntry {
     category: String,
     characteristic: String,
     obfuscated: String,
+    #[serde(default)]
+    outside_characters: Option<bool>,
     file_count: Option<usize>,
 }
 
@@ -221,6 +233,7 @@ struct MetadataResult {
     category: String,
     characteristic: String,
     obfuscated: String,
+    outside_characters: bool,
     file_count: Option<usize>,
 }
 
@@ -255,6 +268,18 @@ enum KawaiiRuntimeUiState {
         error: String,
     },
     LinuxCommands {
+        error: String,
+    },
+}
+
+#[derive(Clone, Default)]
+enum EncryptionUiState {
+    #[default]
+    Hidden,
+    Available(Vec<PathBuf>),
+    Encrypting(Vec<PathBuf>),
+    Failed {
+        mods: Vec<PathBuf>,
         error: String,
     },
 }
@@ -467,41 +492,49 @@ impl RepakModManager {
             };
             let identity = normalized_mod_identity_string(path);
             let utoc_path = path.with_extension("utoc");
-            let is_iostore = utoc_path.exists();
-            let obfuscated = if is_iostore {
+            let is_iostore = utoc_path.exists() && path.with_extension("ucas").exists();
+            let (encrypted, obfuscated) = if is_iostore {
                 match is_iostore_obfuscated(&utoc_path) {
-                    Ok(value) => value.to_string(),
+                    Ok(value) => (value, value.to_string()),
                     Err(e) => {
-                        warn!(error = %e, "Failed to read IoStore obfuscation flag");
-                        "Unknown".to_string()
+                        warn!(error = %e, "Failed to read IoStore encryption state");
+                        (false, "Unknown".to_string())
                     }
                 }
             } else {
-                "false".to_string()
+                (false, "false".to_string())
             };
 
             let cached = cache_by_identity
                 .get(&identity)
-                .filter(|entry| entry.signature == signature);
-            let (category, characteristic, metadata_pending, file_count) = match cached {
-                Some(entry) => (
-                    entry.category.clone(),
-                    entry.characteristic.clone(),
-                    false,
-                    entry.file_count,
-                ),
-                None => {
-                    jobs.push(MetadataJob {
-                        generation,
-                        path: path.to_path_buf(),
-                        identity: identity.clone(),
-                        signature,
-                        obfuscated: obfuscated.clone(),
-                        is_iostore,
-                    });
-                    ("Pending".to_string(), "Pending".to_string(), true, None)
-                }
-            };
+                .filter(|entry| entry.signature == signature && entry.outside_characters.is_some());
+            let (category, characteristic, outside_characters, metadata_pending, file_count) =
+                match cached {
+                    Some(entry) => (
+                        entry.category.clone(),
+                        entry.characteristic.clone(),
+                        entry.outside_characters.unwrap_or(false),
+                        false,
+                        entry.file_count,
+                    ),
+                    None => {
+                        jobs.push(MetadataJob {
+                            generation,
+                            path: path.to_path_buf(),
+                            identity: identity.clone(),
+                            signature,
+                            obfuscated: obfuscated.clone(),
+                            is_iostore,
+                        });
+                        (
+                            "Pending".to_string(),
+                            "Pending".to_string(),
+                            false,
+                            true,
+                            None,
+                        )
+                    }
+                };
 
             next_entries.push(ModEntry {
                 path: path.to_path_buf(),
@@ -511,6 +544,8 @@ impl RepakModManager {
                 category,
                 characteristic,
                 obfuscated,
+                encrypted,
+                outside_characters,
                 metadata_pending,
                 file_count,
             });
@@ -628,6 +663,7 @@ impl RepakModManager {
             entry.category = result.category.clone();
             entry.characteristic = result.characteristic.clone();
             entry.obfuscated = result.obfuscated.clone();
+            entry.outside_characters = result.outside_characters;
             entry.metadata_pending = false;
             entry.file_count = result.file_count;
         }
@@ -638,6 +674,7 @@ impl RepakModManager {
             category: result.category,
             characteristic: result.characteristic,
             obfuscated: result.obfuscated,
+            outside_characters: Some(result.outside_characters),
             file_count: result.file_count,
         };
 
@@ -781,6 +818,7 @@ impl RepakModManager {
             return;
         };
         let obfuscated = current_mod.obfuscated.clone();
+        let encrypted = current_mod.encrypted;
         let characteristic = current_mod.characteristic.clone();
 
         egui::CollapsingHeader::new("Pak details")
@@ -824,6 +862,10 @@ impl RepakModManager {
                 ui.horizontal(|ui| {
                     ui.add(Label::new(RichText::new("Obfuscated: ").strong()));
                     ui.add(Label::new(obfuscated));
+                });
+                ui.horizontal(|ui| {
+                    ui.add(Label::new(RichText::new("Encrypted: ").strong()));
+                    ui.add(Label::new(encrypted.to_string()));
                 });
             });
         ui.horizontal(|ui| {
@@ -952,6 +994,15 @@ impl RepakModManager {
                         }
 
                         let is_iostore = self.pak_files[i].is_iostore;
+                        let failure_message = if !is_iostore {
+                            Some(LEGACY_PAK_MESSAGE)
+                        } else if self.pak_files[i].outside_characters
+                            && !self.pak_files[i].encrypted
+                        {
+                            Some(ENCRYPTION_REQUIRED_MESSAGE)
+                        } else {
+                            None
+                        };
                         let is_selected = self.current_pak_file_idx == Some(i);
                         let row_fill = if is_selected {
                             Color32::from_rgb(54, 28, 35)
@@ -975,12 +1026,14 @@ impl RepakModManager {
                                     let left_width = (ui.available_width() - 62.0).max(120.0);
                                     ui.vertical(|ui| {
                                         ui.set_width(left_width);
+                                        let mut name_text = RichText::new(&display_name)
+                                            .strong()
+                                            .size(self.default_font_size);
+                                        if failure_message.is_some() {
+                                            name_text = name_text.color(RED_THEME_COLOR);
+                                        }
                                         ui.add(
-                                            Label::new(
-                                                RichText::new(&display_name)
-                                                    .strong()
-                                                    .size(self.default_font_size),
-                                            )
+                                            Label::new(name_text)
                                             .truncate()
                                             .selectable(false),
                                         );
@@ -1065,6 +1118,10 @@ impl RepakModManager {
                             egui::pos2(row_rect.max.x - 70.0, row_rect.max.y),
                         );
 
+                        let hover_text = match failure_message {
+                            Some(message) => format!("{message}\n\n{}", raw_path),
+                            None => format!("View files and details\n{}", raw_path),
+                        };
                         let row_response = ui
                             .interact(
                                 clickable_rect,
@@ -1072,7 +1129,7 @@ impl RepakModManager {
                                 egui::Sense::click(),
                             )
                             .on_hover_cursor(egui::CursorIcon::PointingHand)
-                            .on_hover_text(format!("View files and details\n{}", raw_path));
+                            .on_hover_text(hover_text);
 
 
                         if row_response.clicked() && !toggler_clicked{
@@ -1119,6 +1176,36 @@ impl RepakModManager {
     ) {
         self.show_tag_context_menu(ui, pak_path);
         ui.separator();
+        if is_iostore {
+            let encryption_running = self
+                .encryption_worker
+                .as_ref()
+                .is_some_and(|worker| !worker.is_finished());
+            let already_encrypted = self
+                .pak_files
+                .get(i)
+                .map(|entry| entry.encrypted)
+                .unwrap_or(false);
+            let label = if already_encrypted {
+                "Re-encrypt mod"
+            } else {
+                "Encrypt mod"
+            };
+            let response = ui.add_enabled(
+                self.game_chunk_path.is_some() && !encryption_running,
+                Button::new(label),
+            );
+            if self.game_chunk_path.is_none() {
+                response.clone().on_hover_text(
+                    "The Marvel Rivals game Paks directory is required to encrypt this mod.",
+                );
+            }
+            if response.clicked() {
+                ui.close_menu();
+                self.start_encrypt_mods(vec![pak_path.to_path_buf()]);
+            }
+            ui.separator();
+        }
         if ui.button("Extract pak to directory").clicked() {
             info!(
                 mod_name = %pak_path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("<unknown>"),
@@ -1277,6 +1364,7 @@ impl RepakModManager {
                     editing: false,
                     enabled: true,
                     obfuscated: false,
+                    encrypted: false,
                     extracted_archive_dir: None,
                 }
             };
@@ -1977,6 +2065,290 @@ impl RepakModManager {
         }
         self.fix_kawaii_progress.store(-255, Ordering::SeqCst);
         ctx.request_repaint();
+    }
+
+    fn installed_iostore_mod(&self, path: &Path) -> Option<InstallableMod> {
+        let entry = self
+            .pak_files
+            .iter()
+            .find(|entry| same_mod_identity(&entry.path, path))?;
+        if !entry.is_iostore {
+            return None;
+        }
+
+        Some(InstallableMod {
+            mod_name: entry
+                .path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("encrypted_mod")
+                .to_string(),
+            mod_type: entry.characteristic.clone(),
+            repak: false,
+            fix_mesh: false,
+            kawaii_porter: false,
+            default_hidden_material_patch: false,
+            is_dir: false,
+            editing: false,
+            path_hash_seed: "00000000".to_string(),
+            mount_point: "../../../".to_string(),
+            compression: repak::Compression::Oodle,
+            reader: None,
+            mod_path: entry.path.clone(),
+            total_files: entry.file_count.unwrap_or(1).max(1),
+            iostore: true,
+            is_archived: false,
+            enabled: entry.enabled,
+            obfuscated: entry.obfuscated.eq_ignore_ascii_case("true"),
+            encrypted: true,
+            extracted_archive_dir: None,
+        })
+    }
+
+    fn start_encrypt_mods(&mut self, paths: Vec<PathBuf>) {
+        if self
+            .encryption_worker
+            .as_ref()
+            .is_some_and(|worker| !worker.is_finished())
+        {
+            return;
+        }
+
+        let Some(game_chunk_path) = self.game_chunk_path.clone() else {
+            self.encryption_state = EncryptionUiState::Failed {
+                mods: paths,
+                error: "The Marvel Rivals game Paks directory could not be found.".to_string(),
+            };
+            return;
+        };
+        let mods = paths
+            .iter()
+            .filter_map(|path| self.installed_iostore_mod(path))
+            .collect::<Vec<_>>();
+        if mods.is_empty() {
+            return;
+        }
+
+        let displayed_paths = mods
+            .iter()
+            .map(|installable| installable.mod_path.clone())
+            .collect::<Vec<_>>();
+        let mod_directory = self.game_path.clone();
+        let progress = Arc::new(AtomicI32::new(0));
+        self.encryption_state = EncryptionUiState::Encrypting(displayed_paths);
+        self.encryption_prompt_evaluated = true;
+        crate::install_terminal::clear_terminal();
+        #[cfg(windows)]
+        if crate::has_attached_console() {
+            crate::redirect_stdio();
+        }
+        info!(mod_count = mods.len(), "Starting encryption repack with terminal progress");
+        self.encryption_worker = Some(thread::spawn(move || {
+            for installable in mods {
+                encrypt_installed_iostore_mod(
+                    &installable,
+                    &mod_directory,
+                    progress.clone(),
+                    &Some(game_chunk_path.clone()),
+                )
+                .map_err(|error| format!("Failed to encrypt {}: {error}", installable.mod_name))?;
+            }
+            progress.store(-255, Ordering::SeqCst);
+            Ok(())
+        }));
+    }
+
+    fn process_encryption_worker(&mut self, ctx: &egui::Context) {
+        let worker_finished = self
+            .encryption_worker
+            .as_ref()
+            .is_some_and(|worker| worker.is_finished());
+
+        if matches!(self.encryption_state, EncryptionUiState::Encrypting(_)) {
+            crate::install_terminal::show_install_terminal(ctx, worker_finished);
+        }
+
+        if !worker_finished {
+            return;
+        }
+
+        let Some(worker) = self.encryption_worker.take() else {
+            return;
+        };
+        let attempted = match &self.encryption_state {
+            EncryptionUiState::Encrypting(mods) => mods.clone(),
+            _ => Vec::new(),
+        };
+        match worker.join() {
+            Ok(Ok(())) => {
+                info!(
+                    mod_count = attempted.len(),
+                    "Finished encrypting installed IoStore mods"
+                );
+                self.encryption_state = EncryptionUiState::Hidden;
+            }
+            Ok(Err(error)) => {
+                error!(error = %error, "Failed to encrypt installed IoStore mods");
+                self.encryption_state = EncryptionUiState::Failed {
+                    mods: attempted,
+                    error,
+                };
+            }
+            Err(_) => {
+                self.encryption_state = EncryptionUiState::Failed {
+                    mods: attempted,
+                    error: "The encryption worker panicked.".to_string(),
+                };
+            }
+        }
+        self.collect_pak_files();
+        ctx.request_repaint();
+    }
+
+    fn maybe_show_encryption_prompt(&mut self) {
+        if self.encryption_prompt_evaluated
+            || self.metadata_receiver.is_some()
+            || !matches!(self.update_state, UpdateUiState::Idle)
+        {
+            return;
+        }
+        self.encryption_prompt_evaluated = true;
+        let affected = self
+            .pak_files
+            .iter()
+            .filter(|entry| {
+                entry.is_iostore
+                    && !entry.metadata_pending
+                    && entry.outside_characters
+                    && !entry.encrypted
+            })
+            .map(|entry| entry.path.clone())
+            .collect::<Vec<_>>();
+        if !affected.is_empty() {
+            self.encryption_state = EncryptionUiState::Available(affected);
+        }
+    }
+
+    fn show_encryption_window(&mut self, ctx: &egui::Context) {
+        if !matches!(self.update_state, UpdateUiState::Idle) {
+            return;
+        }
+
+        enum EncryptionAction {
+            Start(Vec<PathBuf>),
+            Dismiss,
+        }
+
+        let snapshot = self.encryption_state.clone();
+        let mut action = None;
+        match snapshot {
+            EncryptionUiState::Hidden => return,
+            EncryptionUiState::Available(mods) => {
+                let window_size = update_window_size(ctx);
+                egui::Window::new("Mods need encryption")
+                    .collapsible(false)
+                    .resizable(false)
+                    .fixed_size(window_size)
+                    .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    .frame(update_window_frame(ctx))
+                    .show(ctx, |ui| {
+                        let (left_width, right_width, scroll_height) = update_window_layout(ui);
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.set_width(left_width);
+                                ui.heading("Encryption required");
+                                ui.add_space(8.0);
+                                ui.add(Label::new(ENCRYPTION_REQUIRED_MESSAGE).wrap());
+                                ui.add_space(12.0);
+                                if ui
+                                    .add_sized(
+                                        [left_width, 30.0],
+                                        Button::new(
+                                            RichText::new("Encrypt all").color(Color32::WHITE),
+                                        )
+                                        .fill(RED_THEME_COLOR),
+                                    )
+                                    .clicked()
+                                {
+                                    action = Some(EncryptionAction::Start(mods.clone()));
+                                }
+                                if ui
+                                    .add_sized([left_width, 28.0], Button::new("Not now"))
+                                    .clicked()
+                                {
+                                    action = Some(EncryptionAction::Dismiss);
+                                }
+                            });
+
+                            ui.separator();
+                            ui.vertical(|ui| {
+                                ui.set_width(right_width);
+                                ui.heading("Affected mods");
+                                ui.add_space(8.0);
+                                ScrollArea::vertical()
+                                    .id_salt("encryption_candidates")
+                                    .max_height(scroll_height)
+                                    .show(ui, |ui| {
+                                        for path in &mods {
+                                            ui.horizontal(|ui| {
+                                                ui.add(
+                                                    Label::new(
+                                                        path.file_stem()
+                                                            .and_then(|stem| stem.to_str())
+                                                            .unwrap_or("Unknown mod"),
+                                                    )
+                                                    .truncate(),
+                                                );
+                                                ui.with_layout(
+                                                    egui::Layout::right_to_left(Align::Center),
+                                                    |ui| {
+                                                        if ui.button("Encrypt").clicked() {
+                                                            action = Some(EncryptionAction::Start(
+                                                                vec![path.clone()],
+                                                            ));
+                                                        }
+                                                    },
+                                                );
+                                            });
+                                            ui.separator();
+                                        }
+                                    });
+                            });
+                        });
+                    });
+            }
+            EncryptionUiState::Encrypting(_) => {}
+            EncryptionUiState::Failed { mods, error } => {
+                egui::Window::new("Encryption failed")
+                    .collapsible(false)
+                    .resizable(false)
+                    .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    .frame(update_window_frame(ctx))
+                    .show(ctx, |ui| {
+                        ui.add(
+                            Label::new(
+                                RichText::new(&error).color(Color32::from_rgb(255, 145, 160)),
+                            )
+                            .wrap(),
+                        );
+                        ui.add_space(12.0);
+                        ui.horizontal(|ui| {
+                            if !mods.is_empty() && ui.button("Try again").clicked() {
+                                action = Some(EncryptionAction::Start(mods.clone()));
+                            }
+                            if ui.button("Close").clicked() {
+                                action = Some(EncryptionAction::Dismiss);
+                            }
+                        });
+                    });
+            }
+        }
+
+        match action {
+            Some(EncryptionAction::Start(mods)) => self.start_encrypt_mods(mods),
+            Some(EncryptionAction::Dismiss) => self.encryption_state = EncryptionUiState::Hidden,
+            None => {}
+        }
     }
 
     fn show_kawaii_runtime_window(&mut self, ctx: &egui::Context) {
@@ -2758,6 +3130,7 @@ impl eframe::App for RepakModManager {
         self.process_update_messages(ctx);
         self.show_update_window(ctx);
         self.process_fix_kawaii_worker(ctx);
+        self.process_encryption_worker(ctx);
         self.process_kawaii_runtime_messages(ctx);
         self.show_kawaii_runtime_window(ctx);
         self.show_default_hidden_material_bitmap_creator(ctx);
@@ -2768,6 +3141,8 @@ impl eframe::App for RepakModManager {
             }
         }
         self.process_metadata_messages(ctx);
+        self.maybe_show_encryption_prompt();
+        self.show_encryption_window(ctx);
 
         let mut collect_pak = false;
 
@@ -2941,6 +3316,7 @@ fn normalize_mod_display_name(name: &str) -> String {
 fn classify_mod_metadata(job: &MetadataJob) -> Result<MetadataResult, String> {
     let files = files_for_metadata(&job.path, job.is_iostore)?;
     let file_count = Some(files.len());
+    let outside_characters = job.is_iostore && touches_outside_characters_prefix(&files);
     Ok(MetadataResult {
         generation: job.generation,
         identity: job.identity.clone(),
@@ -2948,7 +3324,21 @@ fn classify_mod_metadata(job: &MetadataJob) -> Result<MetadataResult, String> {
         category: detect_mod_category(&files),
         characteristic: get_current_pak_characteristics(files),
         obfuscated: job.obfuscated.clone(),
+        outside_characters,
         file_count,
+    })
+}
+
+fn touches_outside_characters_prefix(files: &[String]) -> bool {
+    files.iter().any(|file| {
+        let normalized = file.trim().replace('\\', "/").to_ascii_lowercase();
+        let normalized = normalized
+            .strip_prefix("../../../marvel/content/marvel/")
+            .or_else(|| normalized.strip_prefix("marvel/content/marvel/"))
+            .map(|path| format!("/game/marvel/{path}"))
+            .unwrap_or(normalized);
+        normalized != "/game/marvel/characters"
+            && !normalized.starts_with("/game/marvel/characters/")
     })
 }
 
@@ -3234,4 +3624,21 @@ fn normalized_mod_identity_string(path: &Path) -> String {
     normalized_mod_identity(path)
         .to_string_lossy()
         .to_ascii_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::touches_outside_characters_prefix;
+
+    #[test]
+    fn detects_packages_outside_the_characters_prefix() {
+        assert!(!touches_outside_characters_prefix(&[
+            "/Game/Marvel/Characters/1059/Hero.uasset".to_string(),
+            "../../../Marvel/Content/Marvel/Characters/1059/Hero.uexp".to_string(),
+        ]));
+        assert!(touches_outside_characters_prefix(&[
+            "/Game/Marvel/Characters/1059/Hero.uasset".to_string(),
+            "/Game/Marvel/VFX/Hero.uasset".to_string(),
+        ]));
+    }
 }

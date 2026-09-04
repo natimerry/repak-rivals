@@ -47,17 +47,26 @@ fn close_to_legacy_console() {
 fn backup_existing_mod_files(
     mod_directory: &Path,
     normalized_mod_name: &str,
+    current_pak_path: &Path,
 ) -> std::io::Result<()> {
-    for ext in ["pak", "utoc", "ucas"] {
-        let path = mod_directory.join(format!("{normalized_mod_name}.{ext}"));
+    let paths = [
+        current_pak_path.to_path_buf(),
+        mod_directory.join(format!("{normalized_mod_name}.utoc")),
+        mod_directory.join(format!("{normalized_mod_name}.ucas")),
+    ];
+    for path in paths {
         if !path.exists() {
             continue;
         }
 
-        let mut backup = mod_directory.join(format!("{normalized_mod_name}.{ext}.rebak"));
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(normalized_mod_name);
+        let mut backup = path.with_file_name(format!("{file_name}.rebak"));
         let mut suffix = 1usize;
         while backup.exists() {
-            backup = mod_directory.join(format!("{normalized_mod_name}.{ext}.{suffix}.rebak"));
+            backup = path.with_file_name(format!("{file_name}.{suffix}.rebak"));
             suffix += 1;
         }
         std::fs::rename(&path, &backup)?;
@@ -70,8 +79,14 @@ fn copy_fixed_iostore_files(
     from_dir: &Path,
     mod_directory: &Path,
     normalized_mod_name: &str,
+    target_pak_path: &Path,
 ) -> std::io::Result<()> {
-    for ext in ["pak", "utoc", "ucas"] {
+    let source_pak = from_dir.join(format!("{normalized_mod_name}.pak"));
+    if source_pak.exists() {
+        std::fs::copy(source_pak, target_pak_path)?;
+    }
+
+    for ext in ["utoc", "ucas"] {
         let file_name = format!("{normalized_mod_name}.{ext}");
         let src = from_dir.join(&file_name);
         if src.exists() {
@@ -160,7 +175,10 @@ fn repack_iostore_via_fast_extract(
     );
     let mut fixed_mod = installable_mod.clone();
     fixed_mod.is_dir = true;
-    fixed_mod.iostore = false;
+    // This is still an IoStore mod even though its extracted staging input is a
+    // directory. Keeping that distinction prevents audio/movie IoStore mods
+    // from being converted into legacy pak-only mods during a rebuild.
+    fixed_mod.iostore = true;
     fixed_mod.repak = false;
     fixed_mod.kawaii_porter = kawaii_porter;
     fixed_mod.default_hidden_material_patch = patch_default_hidden_materials;
@@ -189,10 +207,11 @@ pub fn fix_installed_iostore_kawaii_physics(
     kawaii_physics_usmap: &Option<PathBuf>,
 ) -> Result<(), repak::Error> {
     let output_temp = tempfile::tempdir().map_err(repak::Error::Io)?;
+    let source_mods_dir = installable_mod.mod_path.parent().unwrap_or(mod_directory);
     repack_iostore_via_fast_extract(
         installable_mod,
         output_temp.path(),
-        mod_directory,
+        source_mods_dir,
         installed_mods_ptr,
         chunkdir,
         kawaii_physics_usmap,
@@ -201,10 +220,20 @@ pub fn fix_installed_iostore_kawaii_physics(
         None,
     )?;
 
-    backup_existing_mod_files(mod_directory, &installable_mod.mod_name)
-        .map_err(repak::Error::Io)?;
-    copy_fixed_iostore_files(output_temp.path(), mod_directory, &installable_mod.mod_name)
-        .map_err(repak::Error::Io)?;
+    let target_mod_directory = installable_mod.mod_path.parent().unwrap_or(mod_directory);
+    backup_existing_mod_files(
+        target_mod_directory,
+        &installable_mod.mod_name,
+        &installable_mod.mod_path,
+    )
+    .map_err(repak::Error::Io)?;
+    copy_fixed_iostore_files(
+        output_temp.path(),
+        target_mod_directory,
+        &installable_mod.mod_name,
+        &installable_mod.mod_path,
+    )
+    .map_err(repak::Error::Io)?;
 
     Ok(())
 }
@@ -218,10 +247,11 @@ pub fn patch_installed_iostore_default_hidden_materials(
     default_hidden_material_bitmaps: Option<&[u64]>,
 ) -> Result<(), repak::Error> {
     let output_temp = tempfile::tempdir().map_err(repak::Error::Io)?;
+    let source_mods_dir = installable_mod.mod_path.parent().unwrap_or(mod_directory);
     repack_iostore_via_fast_extract(
         installable_mod,
         output_temp.path(),
-        mod_directory,
+        source_mods_dir,
         installed_mods_ptr,
         chunkdir,
         kawaii_physics_usmap,
@@ -230,10 +260,58 @@ pub fn patch_installed_iostore_default_hidden_materials(
         default_hidden_material_bitmaps,
     )?;
 
-    backup_existing_mod_files(mod_directory, &installable_mod.mod_name)
-        .map_err(repak::Error::Io)?;
-    copy_fixed_iostore_files(output_temp.path(), mod_directory, &installable_mod.mod_name)
-        .map_err(repak::Error::Io)?;
+    let target_mod_directory = installable_mod.mod_path.parent().unwrap_or(mod_directory);
+    backup_existing_mod_files(
+        target_mod_directory,
+        &installable_mod.mod_name,
+        &installable_mod.mod_path,
+    )
+    .map_err(repak::Error::Io)?;
+    copy_fixed_iostore_files(
+        output_temp.path(),
+        target_mod_directory,
+        &installable_mod.mod_name,
+        &installable_mod.mod_path,
+    )
+    .map_err(repak::Error::Io)?;
+
+    Ok(())
+}
+
+pub fn encrypt_installed_iostore_mod(
+    installable_mod: &InstallableMod,
+    mod_directory: &Path,
+    installed_mods_ptr: Arc<AtomicI32>,
+    chunkdir: &Option<PathBuf>,
+) -> Result<(), repak::Error> {
+    let output_temp = tempfile::tempdir().map_err(repak::Error::Io)?;
+    let source_mods_dir = installable_mod.mod_path.parent().unwrap_or(mod_directory);
+    repack_iostore_via_fast_extract(
+        installable_mod,
+        output_temp.path(),
+        source_mods_dir,
+        installed_mods_ptr,
+        chunkdir,
+        &None,
+        false,
+        false,
+        None,
+    )?;
+
+    let target_mod_directory = installable_mod.mod_path.parent().unwrap_or(mod_directory);
+    backup_existing_mod_files(
+        target_mod_directory,
+        &installable_mod.mod_name,
+        &installable_mod.mod_path,
+    )
+    .map_err(repak::Error::Io)?;
+    copy_fixed_iostore_files(
+        output_temp.path(),
+        target_mod_directory,
+        &installable_mod.mod_name,
+        &installable_mod.mod_path,
+    )
+    .map_err(repak::Error::Io)?;
 
     Ok(())
 }
@@ -396,4 +474,38 @@ pub fn install_mods_in_viewport(
     // set i32 to -255 magic value to indicate mod installation is done
     AtomicI32::store(&installed_mods_ptr, -255, Ordering::SeqCst);
     info!("Install worker finished");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{backup_existing_mod_files, copy_fixed_iostore_files};
+
+    #[test]
+    fn rebuilding_a_disabled_iostore_mod_keeps_it_disabled() {
+        let target = tempfile::tempdir().unwrap();
+        let replacement = tempfile::tempdir().unwrap();
+        let name = "nested_mod_9999999_P";
+        let disabled_pak = target.path().join(format!("{name}.bak_repak"));
+
+        std::fs::write(&disabled_pak, b"old pak").unwrap();
+        std::fs::write(target.path().join(format!("{name}.utoc")), b"old utoc").unwrap();
+        std::fs::write(target.path().join(format!("{name}.ucas")), b"old ucas").unwrap();
+        std::fs::write(replacement.path().join(format!("{name}.pak")), b"new pak").unwrap();
+        std::fs::write(replacement.path().join(format!("{name}.utoc")), b"new utoc").unwrap();
+        std::fs::write(replacement.path().join(format!("{name}.ucas")), b"new ucas").unwrap();
+
+        backup_existing_mod_files(target.path(), name, &disabled_pak).unwrap();
+        copy_fixed_iostore_files(replacement.path(), target.path(), name, &disabled_pak).unwrap();
+
+        assert_eq!(std::fs::read(&disabled_pak).unwrap(), b"new pak");
+        assert!(!target.path().join(format!("{name}.pak")).exists());
+        assert_eq!(
+            std::fs::read(target.path().join(format!("{name}.bak_repak.rebak"))).unwrap(),
+            b"old pak"
+        );
+        assert_eq!(
+            std::fs::read(target.path().join(format!("{name}.utoc"))).unwrap(),
+            b"new utoc"
+        );
+    }
 }

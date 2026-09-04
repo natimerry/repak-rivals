@@ -52,6 +52,7 @@ pub struct InstallableMod {
     pub is_archived: bool,
     pub enabled: bool,
     pub obfuscated: bool,
+    pub encrypted: bool,
     // Keeps extracted archive files alive while the install dialog/worker still references them.
     #[allow(dead_code)]
     pub extracted_archive_dir: Option<Arc<TempDir>>,
@@ -62,6 +63,7 @@ impl Default for InstallableMod {
     fn default() -> Self {
         InstallableMod {
             obfuscated: false,
+            encrypted: false,
             mod_name: "".to_string(),
             mod_type: "".to_string(),
             repak: false,
@@ -465,6 +467,14 @@ impl ModInstallRequest {
                                     porter_enabled,
                                     Checkbox::new(&mut mods.obfuscated, "Obfuscate"),
                                 );
+                                let encryption_enabled = mods.is_dir || mods.iostore || mods.repak;
+                                let encrypt_response = ui.add_enabled(
+                                    encryption_enabled,
+                                    Checkbox::new(&mut mods.encrypted, "Encrypt"),
+                                );
+                                if encrypt_response.changed() && mods.encrypted && mods.iostore {
+                                    mods.repak = true;
+                                }
 
                                 let text_edit = TextEdit::singleline(&mut mods.mount_point);
                                 ui.add_enabled(

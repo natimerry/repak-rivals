@@ -260,7 +260,7 @@ pub fn convert_directory_to_iostore(
     default_hidden_material_bitmaps: Option<&[u64]>,
 ) -> Result<(), repak::Error> {
     let mod_type = pak.mod_type.clone();
-    if mod_type == "Audio" || mod_type == "Movies" {
+    if !pak.iostore && !pak.encrypted && (mod_type == "Audio" || mod_type == "Movies") {
         debug!("{} mod detected. Not creating iostore packages", mod_type);
         repak_dir(pak, to_pak_dir, mod_dir, &packed_files_count)?;
         return Ok(());
@@ -287,7 +287,7 @@ pub fn convert_directory_to_iostore(
         EngineVersion::UE5_3,
         Some(compression::CompressionMethod::Oodle),
     )
-    .with_obfuscation(pak.obfuscated);
+    .with_obfuscation(pak.obfuscated || pak.encrypted);
 
     let needs_uassetapi = kawaii_porter
         || patch_default_hidden_materials
@@ -340,7 +340,7 @@ pub fn convert_directory_to_iostore(
                 )))
             })?;
 
-    config.aes_keys.insert(FGuid::default(), aes_toc.clone());
+    config.aes_keys.insert(FGuid::default(), aes_toc);
     let config = Arc::new(config);
 
     let base_progress = packed_files_count.load(Ordering::SeqCst);
@@ -539,6 +539,48 @@ pub fn to_legacy_uasset_fast_with_progress(
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::convert_directory_to_iostore;
+    use crate::install_mod::InstallableMod;
+    use crate::utoc_utils::is_iostore_obfuscated;
+    use std::sync::atomic::AtomicI32;
+    use std::sync::Arc;
+
+    #[test]
+    fn encryption_option_uses_the_obfuscation_writer() {
+        let input = tempfile::tempdir().unwrap();
+        let output = tempfile::tempdir().unwrap();
+        let installable = InstallableMod {
+            mod_name: "encrypted_test".to_string(),
+            mod_type: "Character (Unknown)".to_string(),
+            is_dir: true,
+            encrypted: true,
+            mount_point: "../../../".to_string(),
+            path_hash_seed: "00000000".to_string(),
+            compression: repak::Compression::Oodle,
+            total_files: 1,
+            ..Default::default()
+        };
+
+        convert_directory_to_iostore(
+            &installable,
+            output.path().to_path_buf(),
+            input.path().to_path_buf(),
+            Arc::new(AtomicI32::new(0)),
+            None,
+            false,
+            false,
+            None,
+        )
+        .unwrap();
+
+        assert!(
+            is_iostore_obfuscated(&output.path().join("encrypted_test_9999999_P.utoc")).unwrap()
+        );
+    }
 }
 
 fn to_legacy_uasset_fast_inner(
