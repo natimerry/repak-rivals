@@ -248,30 +248,70 @@ pub fn mods_need_kawaii_mapping(mods: &[InstallableMod]) -> bool {
 }
 
 pub fn match_exact_paks_suffix(path: &Path) -> Option<PathBuf> {
-    let target = ["MarvelRivals", "MarvelGame", "Marvel", "Content", "Paks"];
+    // The directory above MarvelGame is launcher/install specific. Steam
+    // normally calls it MarvelRivals, while other distributions may append a
+    // generated suffix (for example MarvelRivalsjKtnW). The game-relative
+    // suffix is the stable part we can safely identify.
+    let target = ["MarvelGame", "Marvel", "Content", "Paks"];
 
     let components: Vec<_> = path
         .components()
         .filter_map(|c| c.as_os_str().to_str())
         .collect();
 
-    let start = components.iter().position(|c| *c == "MarvelRivals")?;
-    let remaining = &components[start..];
-
-    if remaining.len() < target.len() || remaining[..target.len()] != target {
+    if components.len() < target.len() {
         return None;
     }
 
-    if remaining.len() != target.len() {
+    let suffix = &components[components.len() - target.len()..];
+    if !suffix
+        .iter()
+        .zip(target)
+        .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
+    {
         return None;
     }
 
-    let mut result = PathBuf::new();
-    for c in &components[..start + target.len()] {
-        result.push(c);
+    Some(path.clean())
+}
+
+pub fn find_rivals_paks_ancestor(path: &Path) -> Option<PathBuf> {
+    path.ancestors().find_map(match_exact_paks_suffix)
+}
+
+#[cfg(test)]
+mod paks_path_tests {
+    use super::{find_rivals_paks_ancestor, match_exact_paks_suffix};
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn detects_non_steam_rivals_paks_path() {
+        let path = Path::new(
+            r"G:\MarvelRivalsjKtnW\MarvelGame\Marvel\Content\Paks",
+        );
+        assert_eq!(match_exact_paks_suffix(path), Some(PathBuf::from(path)));
     }
 
-    Some(result)
+    #[test]
+    fn rejects_unrelated_paks_directory() {
+        assert_eq!(
+            match_exact_paks_suffix(Path::new(r"G:\AnotherGame\Content\Paks")),
+            None
+        );
+    }
+
+    #[test]
+    fn derives_paks_from_non_steam_mod_directory() {
+        let mods = Path::new(
+            r"G:\MarvelRivalsjKtnW\MarvelGame\Marvel\Content\Paks\\~mods",
+        );
+        assert_eq!(
+            find_rivals_paks_ancestor(mods),
+            Some(PathBuf::from(
+                r"G:\MarvelRivalsjKtnW\MarvelGame\Marvel\Content\Paks"
+            ))
+        );
+    }
 }
 
 /// Reads `libraryfolders.vdf` to find additional Steam libraries.
