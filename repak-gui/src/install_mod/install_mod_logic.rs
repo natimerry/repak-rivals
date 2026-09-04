@@ -205,6 +205,7 @@ pub fn fix_installed_iostore_kawaii_physics(
     installed_mods_ptr: Arc<AtomicI32>,
     chunkdir: &Option<PathBuf>,
     kawaii_physics_usmap: &Option<PathBuf>,
+    make_backups: bool
 ) -> Result<(), repak::Error> {
     let output_temp = tempfile::tempdir().map_err(repak::Error::Io)?;
     let source_mods_dir = installable_mod.mod_path.parent().unwrap_or(mod_directory);
@@ -221,12 +222,17 @@ pub fn fix_installed_iostore_kawaii_physics(
     )?;
 
     let target_mod_directory = installable_mod.mod_path.parent().unwrap_or(mod_directory);
+
+    if (make_backups)
+    {
     backup_existing_mod_files(
         target_mod_directory,
         &installable_mod.mod_name,
         &installable_mod.mod_path,
     )
     .map_err(repak::Error::Io)?;
+    }
+
     copy_fixed_iostore_files(
         output_temp.path(),
         target_mod_directory,
@@ -245,6 +251,7 @@ pub fn patch_installed_iostore_default_hidden_materials(
     chunkdir: &Option<PathBuf>,
     kawaii_physics_usmap: &Option<PathBuf>,
     default_hidden_material_bitmaps: Option<&[u64]>,
+    make_backups: bool
 ) -> Result<(), repak::Error> {
     let output_temp = tempfile::tempdir().map_err(repak::Error::Io)?;
     let source_mods_dir = installable_mod.mod_path.parent().unwrap_or(mod_directory);
@@ -261,12 +268,17 @@ pub fn patch_installed_iostore_default_hidden_materials(
     )?;
 
     let target_mod_directory = installable_mod.mod_path.parent().unwrap_or(mod_directory);
+
+    if (make_backups)
+    {
     backup_existing_mod_files(
         target_mod_directory,
         &installable_mod.mod_name,
         &installable_mod.mod_path,
     )
     .map_err(repak::Error::Io)?;
+    }
+
     copy_fixed_iostore_files(
         output_temp.path(),
         target_mod_directory,
@@ -283,6 +295,7 @@ pub fn encrypt_installed_iostore_mod(
     mod_directory: &Path,
     installed_mods_ptr: Arc<AtomicI32>,
     chunkdir: &Option<PathBuf>,
+    make_backups: bool
 ) -> Result<(), repak::Error> {
     let output_temp = tempfile::tempdir().map_err(repak::Error::Io)?;
     let source_mods_dir = installable_mod.mod_path.parent().unwrap_or(mod_directory);
@@ -299,12 +312,16 @@ pub fn encrypt_installed_iostore_mod(
     )?;
 
     let target_mod_directory = installable_mod.mod_path.parent().unwrap_or(mod_directory);
+
+    if (make_backups){
     backup_existing_mod_files(
         target_mod_directory,
         &installable_mod.mod_name,
         &installable_mod.mod_path,
     )
     .map_err(repak::Error::Io)?;
+    }
+
     copy_fixed_iostore_files(
         output_temp.path(),
         target_mod_directory,

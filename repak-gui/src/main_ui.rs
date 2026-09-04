@@ -172,6 +172,9 @@ pub struct RepakModManager {
 
     #[serde(default = "default_true")]
     show_char_details: bool,
+
+    #[serde(default = "default_true")]
+    make_backups: bool
 }
 
 fn default_true() -> bool {
@@ -1391,6 +1394,7 @@ impl RepakModManager {
 
                 let game_path = self.game_path.clone();
                 let progress = self.fix_kawaii_progress.clone();
+                let backup = self.make_backups;
                 info!(mod_name = %installable_mod.mod_name, "Starting KawaiiPhysics fix worker with egui terminal progress");
                 self.fix_kawaii_worker = Some(thread::spawn(move || {
                     let result = fix_installed_iostore_kawaii_physics(
@@ -1399,6 +1403,7 @@ impl RepakModManager {
                         progress.clone(),
                         &Some(game_chunk_path),
                         &Some(kawaii_physics_usmap),
+                        backup
                     )
                     .map_err(|e| e.to_string());
                     progress.store(-255, Ordering::SeqCst);
@@ -1449,6 +1454,7 @@ impl RepakModManager {
                 let game_path = self.game_path.clone();
                 let progress = self.fix_kawaii_progress.clone();
                 info!(mod_name = %installable_mod.mod_name, "Starting hidden materials patch worker with egui terminal progress");
+                let backup = self.make_backups;
                 self.fix_kawaii_worker = Some(thread::spawn(move || {
                     let result = patch_installed_iostore_default_hidden_materials(
                         &installable_mod,
@@ -1457,6 +1463,7 @@ impl RepakModManager {
                         &Some(game_chunk_path),
                         &Some(kawaii_physics_usmap),
                         default_hidden_material_bitmaps.as_deref(),
+                        backup
                     )
                     .map_err(|e| e.to_string());
                     progress.store(-255, Ordering::SeqCst);
@@ -2136,6 +2143,8 @@ impl RepakModManager {
             crate::redirect_stdio();
         }
         info!(mod_count = mods.len(), "Starting encryption repack with terminal progress");
+
+        let backup = self.make_backups;
         self.encryption_worker = Some(thread::spawn(move || {
             for installable in mods {
                 encrypt_installed_iostore_mod(
@@ -2143,6 +2152,7 @@ impl RepakModManager {
                     &mod_directory,
                     progress.clone(),
                     &Some(game_chunk_path.clone()),
+                    backup
                 )
                 .map_err(|error| format!("Failed to encrypt {}: {error}", installable.mod_name))?;
             }
@@ -2941,6 +2951,11 @@ impl RepakModManager {
                 ui.horizontal(|ui| {
                     ui.label("Show Character Details");
                     ui.add(ios_widget::toggle(&mut self.show_char_details));
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Make backups");
+                    ui.add(ios_widget::toggle(&mut self.make_backups));
                 });
             });
 
