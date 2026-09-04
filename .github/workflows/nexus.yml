@@ -40,9 +40,7 @@ jobs:
             tag="${{ github.event.release.tag_name }}"
           fi
 
-          release_json="$(gh api \
-            "repos/${{ github.repository }}/releases/tags/${tag}")"
-
+          release_json="$(gh api "repos/${{ github.repository }}/releases/tags/${tag}")"
           release_url="$(jq -r '.html_url' <<<"${release_json}")"
           version="${tag#v}"
 
@@ -66,6 +64,7 @@ jobs:
             --pattern 'repak-gui-*-unknown-linux-gnu.tar.xz'
 
       - name: Install dependencies
+        shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y libarchive-tools zip
@@ -81,18 +80,20 @@ jobs:
           linux_asset="incoming/repak-gui-x86_64-unknown-linux-gnu.tar.xz"
 
           if [ ! -f "${windows_asset}" ]; then
-            echo "Missing Windows release asset" >&2
+            echo "Missing Windows release asset: ${windows_asset}" >&2
             exit 1
           fi
 
           if [ ! -f "${linux_asset}" ]; then
-            echo "Missing Linux release asset" >&2
+            echo "Missing Linux release asset: ${linux_asset}" >&2
             exit 1
           fi
 
+          # Windows release is already a zip.
           cp "${windows_asset}" \
             "prepared/repak-gui-x86_64-pc-windows-msvc.zip"
 
+          # Nexus wants a zip, so convert the Linux tar.xz.
           temp_dir="$(mktemp -d)"
           trap 'rm -rf "${temp_dir}"' EXIT
 
@@ -111,39 +112,29 @@ jobs:
           )
 
       - name: Upload Windows build to Nexus
-        uses: Nexus-Mods/upload-action@v1.0.0-beta.9
+        uses: Nexus-Mods/upload-action@v1.0.0-beta.10
         with:
           api_key: ${{ secrets.NEXUSMODS_API_KEY }}
-
-          # NEW MOD FILE ID — NOT THE OLD UPDATE GROUP ID
-          file_id: ${{ vars.NEXUS_WINDOWS_FILE_ID }}
-
+          file_id: 1795870
           filename: prepared/repak-gui-x86_64-pc-windows-msvc.zip
           display_name: repak-gui-x86_64-pc-windows-msvc
           version: ${{ steps.release.outputs.version }}
-
           description: >-
             GitHub release ${{ steps.release.outputs.tag }}:
             ${{ steps.release.outputs.release_url }}
-
           category: ${{ vars.NEXUS_FILE_CATEGORY || 'main' }}
           archive_existing_version: false
 
       - name: Upload Linux build to Nexus
-        uses: Nexus-Mods/upload-action@v1.0.0-beta.9
+        uses: Nexus-Mods/upload-action@v1.0.0-beta.10
         with:
           api_key: ${{ secrets.NEXUSMODS_API_KEY }}
-
-          # NEW MOD FILE ID — NOT THE OLD UPDATE GROUP ID
-          file_id: ${{ vars.NEXUS_LINUX_FILE_ID }}
-
+          file_id: 1795873
           filename: prepared/repak-gui-x86_64-unknown-linux-gnu.zip
           display_name: repak-gui-x86_64-unknown-linux-gnu
           version: ${{ steps.release.outputs.version }}
-
           description: >-
             GitHub release ${{ steps.release.outputs.tag }}:
             ${{ steps.release.outputs.release_url }}
-
           category: ${{ vars.NEXUS_FILE_CATEGORY || 'main' }}
           archive_existing_version: false
