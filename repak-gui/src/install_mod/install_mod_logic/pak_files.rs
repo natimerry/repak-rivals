@@ -15,9 +15,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use tempfile::tempdir;
 
-use super::iotoc::convert_directory_to_iostore;
-
-const MOD_NAME_SUFFIX: &str = "_9999999_P";
+use super::{ensure_mod_name_suffix, iotoc::convert_directory_to_iostore};
 
 pub fn pak_contains_unsupported_entries(path: &Path) -> Result<bool, repak::Error> {
     let reader = repak::PakBuilder::new()
@@ -59,14 +57,6 @@ pub fn rewrite_unsupported_companion_pak(path: &Path) -> Result<bool, repak::Err
         .persist(path)
         .map_err(|error| repak::Error::Io(error.error))?;
     Ok(true)
-}
-
-fn ensure_mod_name_suffix(name: &str) -> String {
-    if name.ends_with(MOD_NAME_SUFFIX) {
-        name.to_string()
-    } else {
-        format!("{name}{MOD_NAME_SUFFIX}")
-    }
 }
 
 pub fn extract_pak_to_dir(pak: &InstallableMod, install_dir: PathBuf) -> Result<(), repak::Error> {

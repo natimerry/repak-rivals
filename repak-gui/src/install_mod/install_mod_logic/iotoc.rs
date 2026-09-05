@@ -1,3 +1,4 @@
+use super::ensure_mod_name_suffix;
 use crate::install_mod::install_mod_logic::pak_files::repak_dir;
 use crate::install_mod::install_mod_logic::patch_meshes;
 use crate::install_mod::{InstallableMod, AES_KEY};
@@ -13,8 +14,6 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use tracing::{debug, info, instrument};
 use walkdir::WalkDir;
-
-const MOD_NAME_SUFFIX: &str = "_9999999_P";
 
 struct TracingRetocLogProvider {
     installed_assets: Arc<AtomicI32>,
@@ -79,14 +78,6 @@ fn scale_phase_progress(position: u64, length: u64, phase_units: i32) -> i32 {
 
 fn finish_progress_phase(progress: &AtomicI32, base_progress: i32, phase_units: i32) {
     progress.fetch_max(base_progress.saturating_add(phase_units), Ordering::SeqCst);
-}
-
-fn ensure_mod_name_suffix(name: &str) -> String {
-    if name.ends_with(MOD_NAME_SUFFIX) {
-        name.to_string()
-    } else {
-        format!("{name}{MOD_NAME_SUFFIX}")
-    }
 }
 
 fn resolve_package_filter_path(package_name: &str) -> Option<String> {
@@ -554,7 +545,7 @@ mod tests {
         let input = tempfile::tempdir().unwrap();
         let output = tempfile::tempdir().unwrap();
         let installable = InstallableMod {
-            mod_name: "encrypted_test".to_string(),
+            mod_name: "encrypted_test_9999998_P".to_string(),
             mod_type: "Character (Unknown)".to_string(),
             is_dir: true,
             encrypted: true,
@@ -578,7 +569,7 @@ mod tests {
         .unwrap();
 
         assert!(
-            is_iostore_obfuscated(&output.path().join("encrypted_test_9999999_P.utoc")).unwrap()
+            is_iostore_obfuscated(&output.path().join("encrypted_test_9999998_P.utoc")).unwrap()
         );
     }
 }

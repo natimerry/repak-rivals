@@ -286,9 +286,7 @@ mod paks_path_tests {
 
     #[test]
     fn detects_non_steam_rivals_paks_path() {
-        let path = Path::new(
-            r"G:\MarvelRivalsjKtnW\MarvelGame\Marvel\Content\Paks",
-        );
+        let path = Path::new(r"G:\MarvelRivalsjKtnW\MarvelGame\Marvel\Content\Paks");
         assert_eq!(match_exact_paks_suffix(path), Some(PathBuf::from(path)));
     }
 
@@ -302,9 +300,7 @@ mod paks_path_tests {
 
     #[test]
     fn derives_paks_from_non_steam_mod_directory() {
-        let mods = Path::new(
-            r"G:\MarvelRivalsjKtnW\MarvelGame\Marvel\Content\Paks\\~mods",
-        );
+        let mods = Path::new(r"G:\MarvelRivalsjKtnW\MarvelGame\Marvel\Content\Paks\\~mods");
         assert_eq!(
             find_rivals_paks_ancestor(mods),
             Some(PathBuf::from(

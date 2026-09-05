@@ -174,7 +174,7 @@ pub struct RepakModManager {
     show_char_details: bool,
 
     #[serde(default = "default_true")]
-    make_backups: bool
+    make_backups: bool,
 }
 
 fn default_true() -> bool {
@@ -1403,7 +1403,7 @@ impl RepakModManager {
                         progress.clone(),
                         &Some(game_chunk_path),
                         &Some(kawaii_physics_usmap),
-                        backup
+                        backup,
                     )
                     .map_err(|e| e.to_string());
                     progress.store(-255, Ordering::SeqCst);
@@ -1463,7 +1463,7 @@ impl RepakModManager {
                         &Some(game_chunk_path),
                         &Some(kawaii_physics_usmap),
                         default_hidden_material_bitmaps.as_deref(),
-                        backup
+                        backup,
                     )
                     .map_err(|e| e.to_string());
                     progress.store(-255, Ordering::SeqCst);
@@ -2142,7 +2142,10 @@ impl RepakModManager {
         if crate::has_attached_console() {
             crate::redirect_stdio();
         }
-        info!(mod_count = mods.len(), "Starting encryption repack with terminal progress");
+        info!(
+            mod_count = mods.len(),
+            "Starting encryption repack with terminal progress"
+        );
 
         let backup = self.make_backups;
         self.encryption_worker = Some(thread::spawn(move || {
@@ -2152,7 +2155,7 @@ impl RepakModManager {
                     &mod_directory,
                     progress.clone(),
                     &Some(game_chunk_path.clone()),
-                    backup
+                    backup,
                 )
                 .map_err(|error| format!("Failed to encrypt {}: {error}", installable.mod_name))?;
             }

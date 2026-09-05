@@ -24,7 +24,14 @@ pub fn register_kawaii_runtime_error_sender(sender: Sender<String>) {
 }
 
 pub(crate) fn ensure_mod_name_suffix(name: &str) -> String {
-    if name.ends_with(MOD_NAME_SUFFIX) {
+    let has_priority_suffix = name
+        .strip_suffix("_P")
+        .and_then(|name_without_p| name_without_p.rsplit_once('_'))
+        .is_some_and(|(_, priority)| {
+            !priority.is_empty() && priority.bytes().all(|byte| byte.is_ascii_digit())
+        });
+
+    if has_priority_suffix {
         name.to_string()
     } else {
         format!("{name}{MOD_NAME_SUFFIX}")
@@ -81,17 +88,34 @@ fn copy_fixed_iostore_files(
     normalized_mod_name: &str,
     target_pak_path: &Path,
 ) -> std::io::Result<()> {
-    let source_pak = from_dir.join(format!("{normalized_mod_name}.pak"));
-    if source_pak.exists() {
-        std::fs::copy(source_pak, target_pak_path)?;
+    let files = [
+        (
+            from_dir.join(format!("{normalized_mod_name}.pak")),
+            target_pak_path.to_path_buf(),
+        ),
+        (
+            from_dir.join(format!("{normalized_mod_name}.utoc")),
+            mod_directory.join(format!("{normalized_mod_name}.utoc")),
+        ),
+        (
+            from_dir.join(format!("{normalized_mod_name}.ucas")),
+            mod_directory.join(format!("{normalized_mod_name}.ucas")),
+        ),
+    ];
+
+    // Validate the complete replacement before touching the installed mod. A naming mismatch
+    // must fail the operation instead of reporting success after copying zero or partial files.
+    for (source, _) in &files {
+        if !source.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Missing rebuilt IoStore file: {}", source.display()),
+            ));
+        }
     }
 
-    for ext in ["utoc", "ucas"] {
-        let file_name = format!("{normalized_mod_name}.{ext}");
-        let src = from_dir.join(&file_name);
-        if src.exists() {
-            std::fs::copy(src, mod_directory.join(file_name))?;
-        }
+    for (source, target) in files {
+        std::fs::copy(source, target)?;
     }
 
     Ok(())
@@ -205,7 +229,7 @@ pub fn fix_installed_iostore_kawaii_physics(
     installed_mods_ptr: Arc<AtomicI32>,
     chunkdir: &Option<PathBuf>,
     kawaii_physics_usmap: &Option<PathBuf>,
-    make_backups: bool
+    make_backups: bool,
 ) -> Result<(), repak::Error> {
     let output_temp = tempfile::tempdir().map_err(repak::Error::Io)?;
     let source_mods_dir = installable_mod.mod_path.parent().unwrap_or(mod_directory);
@@ -223,14 +247,13 @@ pub fn fix_installed_iostore_kawaii_physics(
 
     let target_mod_directory = installable_mod.mod_path.parent().unwrap_or(mod_directory);
 
-    if (make_backups)
-    {
-    backup_existing_mod_files(
-        target_mod_directory,
-        &installable_mod.mod_name,
-        &installable_mod.mod_path,
-    )
-    .map_err(repak::Error::Io)?;
+    if (make_backups) {
+        backup_existing_mod_files(
+            target_mod_directory,
+            &installable_mod.mod_name,
+            &installable_mod.mod_path,
+        )
+        .map_err(repak::Error::Io)?;
     }
 
     copy_fixed_iostore_files(
@@ -251,7 +274,7 @@ pub fn patch_installed_iostore_default_hidden_materials(
     chunkdir: &Option<PathBuf>,
     kawaii_physics_usmap: &Option<PathBuf>,
     default_hidden_material_bitmaps: Option<&[u64]>,
-    make_backups: bool
+    make_backups: bool,
 ) -> Result<(), repak::Error> {
     let output_temp = tempfile::tempdir().map_err(repak::Error::Io)?;
     let source_mods_dir = installable_mod.mod_path.parent().unwrap_or(mod_directory);
@@ -269,14 +292,13 @@ pub fn patch_installed_iostore_default_hidden_materials(
 
     let target_mod_directory = installable_mod.mod_path.parent().unwrap_or(mod_directory);
 
-    if (make_backups)
-    {
-    backup_existing_mod_files(
-        target_mod_directory,
-        &installable_mod.mod_name,
-        &installable_mod.mod_path,
-    )
-    .map_err(repak::Error::Io)?;
+    if (make_backups) {
+        backup_existing_mod_files(
+            target_mod_directory,
+            &installable_mod.mod_name,
+            &installable_mod.mod_path,
+        )
+        .map_err(repak::Error::Io)?;
     }
 
     copy_fixed_iostore_files(
@@ -295,7 +317,7 @@ pub fn encrypt_installed_iostore_mod(
     mod_directory: &Path,
     installed_mods_ptr: Arc<AtomicI32>,
     chunkdir: &Option<PathBuf>,
-    make_backups: bool
+    make_backups: bool,
 ) -> Result<(), repak::Error> {
     let output_temp = tempfile::tempdir().map_err(repak::Error::Io)?;
     let source_mods_dir = installable_mod.mod_path.parent().unwrap_or(mod_directory);
@@ -313,13 +335,13 @@ pub fn encrypt_installed_iostore_mod(
 
     let target_mod_directory = installable_mod.mod_path.parent().unwrap_or(mod_directory);
 
-    if (make_backups){
-    backup_existing_mod_files(
-        target_mod_directory,
-        &installable_mod.mod_name,
-        &installable_mod.mod_path,
-    )
-    .map_err(repak::Error::Io)?;
+    if (make_backups) {
+        backup_existing_mod_files(
+            target_mod_directory,
+            &installable_mod.mod_name,
+            &installable_mod.mod_path,
+        )
+        .map_err(repak::Error::Io)?;
     }
 
     copy_fixed_iostore_files(
@@ -495,7 +517,23 @@ pub fn install_mods_in_viewport(
 
 #[cfg(test)]
 mod tests {
-    use super::{backup_existing_mod_files, copy_fixed_iostore_files};
+    use super::{backup_existing_mod_files, copy_fixed_iostore_files, ensure_mod_name_suffix};
+
+    #[test]
+    fn existing_numeric_priority_suffix_is_preserved() {
+        assert_eq!(
+            ensure_mod_name_suffix("z_HobbyR34_LunaSnow_DiscoPopNude_9999998_P"),
+            "z_HobbyR34_LunaSnow_DiscoPopNude_9999998_P"
+        );
+        assert_eq!(
+            ensure_mod_name_suffix("ordinary_mod_9999999_P"),
+            "ordinary_mod_9999999_P"
+        );
+        assert_eq!(
+            ensure_mod_name_suffix("ordinary_mod"),
+            "ordinary_mod_9999999_P"
+        );
+    }
 
     #[test]
     fn rebuilding_a_disabled_iostore_mod_keeps_it_disabled() {
@@ -524,5 +562,27 @@ mod tests {
             std::fs::read(target.path().join(format!("{name}.utoc"))).unwrap(),
             b"new utoc"
         );
+    }
+
+    #[test]
+    fn missing_rebuilt_iostore_companion_is_an_error() {
+        let target = tempfile::tempdir().unwrap();
+        let replacement = tempfile::tempdir().unwrap();
+        let name = "incomplete_mod_9999998_P";
+
+        std::fs::write(replacement.path().join(format!("{name}.pak")), b"new pak").unwrap();
+        std::fs::write(replacement.path().join(format!("{name}.utoc")), b"new utoc").unwrap();
+
+        let error = copy_fixed_iostore_files(
+            replacement.path(),
+            target.path(),
+            name,
+            &target.path().join(format!("{name}.pak")),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+        assert!(error.to_string().contains(&format!("{name}.ucas")));
+        assert!(!target.path().join(format!("{name}.pak")).exists());
     }
 }

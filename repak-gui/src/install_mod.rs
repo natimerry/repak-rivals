@@ -101,7 +101,8 @@ pub(crate) fn is_unsupported_companion_entry(mount_point: &str, entry: &str) -> 
 
     ["../../../chunknames", "../../../patched_files"]
         .iter()
-        .any(|unsupported| full_path.eq_ignore_ascii_case(unsupported)) || full_path.contains("desktop.ini")
+        .any(|unsupported| full_path.eq_ignore_ascii_case(unsupported))
+        || full_path.contains("desktop.ini")
 }
 
 fn processable_asset_count<'a>(paths: impl IntoIterator<Item = &'a str>) -> usize {
