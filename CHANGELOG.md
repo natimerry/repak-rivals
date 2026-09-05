@@ -1,4 +1,10 @@
 # Changelog
+## Version 3.8.0
+- Fix mods not installing properly under a different load order suffix.
+- Update retoc.
+- Fix asset_conversion crashing on mods. So crashin mods should work now.
+
+
 ## Version 3.7.4
 - Fix non steam launcher chunkpath detection
 - Strip `desktop.ini` entries for audio mod to disable kicks when in use with pystubber.
