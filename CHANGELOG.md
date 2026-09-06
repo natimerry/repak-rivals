@@ -1,4 +1,7 @@
 # Changelog
+## Version 3.9.0
+- Massively speed up repaking and encryption. Around ~22.39x for most mods. 
+
 ## Version 3.8.0
 - Fix mods not installing properly under a different load order suffix.
 - Update retoc.
