@@ -149,7 +149,7 @@ impl ShowWelcome {
                     "This egui backend doesn't support multiple viewports"
                 );
 
-                setup_custom_style(ctx);
+                // setup_custom_style(ctx,false);
                 egui::CentralPanel::default().show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.heading("Your Support Keeps The Modding Community alive");

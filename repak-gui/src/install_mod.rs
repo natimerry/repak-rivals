@@ -191,7 +191,7 @@ impl ModInstallRequest {
     }
 
     #[instrument(skip(self, ctx, show_callback), fields(mod_count = self.mods.len(), mod_directory = ?self.mod_directory))]
-    pub fn new_mod_dialog(&mut self, ctx: &egui::Context, show_callback: &mut bool) {
+    pub fn new_mod_dialog(&mut self, ctx: &egui::Context, show_callback: &mut bool, pink_theme: bool) {
         if self.show_terminal_progress {
             let install_done = self.installed_mods_cbk.load(SeqCst) == -255;
             if !crate::install_terminal::show_install_terminal(ctx, install_done) {
@@ -204,7 +204,7 @@ impl ModInstallRequest {
             .with_icon(ICON.clone())
             .with_inner_size([1000.0, 800.0])
             .with_always_on_top();
-
+        
         Context::show_viewport_immediate(
             ctx,
             egui::ViewportId::from_hash_of("immediate_viewport"),
@@ -215,7 +215,7 @@ impl ModInstallRequest {
                     "This egui backend doesn't support multiple viewports"
                 );
 
-                setup_custom_style(ctx);
+                setup_custom_style(ctx,pink_theme);
                 egui::CentralPanel::default().show(ctx, |ui| {
                     ui.label("Mods to install");
                     ui.set_min_width(ui.available_width());

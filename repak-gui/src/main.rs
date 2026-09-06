@@ -711,7 +711,7 @@ fn main() {
         "Repak GUI",
         options,
         Box::new(|cc| {
-            setup_custom_style(&cc.egui_ctx);
+            setup_custom_style(&cc.egui_ctx,false);
             Ok(Box::new(
                 RepakModManager::load(cc, path_reset).unwrap_or(RepakModManager::default()),
             ))

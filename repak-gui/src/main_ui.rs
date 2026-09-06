@@ -44,8 +44,10 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use walkdir::WalkDir;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
-const RED_THEME_COLOR: Color32 = Color32::from_rgb(255, 31, 75);
+const RED: Color32 = Color32::from_rgb(255, 31, 75);
+const PINK: Color32 = Color32::from_rgb(255, 105, 180);
 const DEFAULT_HIDDEN_MATERIAL_BITMAPS: [u64; 3] = [0x0FFF0000, 0x0FFF0000, 0x0EFB0000];
+
 const DEFAULT_HIDDEN_MATERIAL_CREATOR_SLOTS: usize = 32;
 const MAX_DEFAULT_HIDDEN_MATERIAL_SLOTS: usize = 64;
 const ENCRYPTION_REQUIRED_MESSAGE: &str = "these mods touch files outside of the /Game/Marvel/Characters prefix so they wont load without encryption";
@@ -77,6 +79,9 @@ impl DefaultHiddenMaterialMode {
 
 #[derive(Deserialize, Serialize, Default)]
 pub struct RepakModManager {
+    #[serde(default)]
+    pink_theme: bool,
+
     game_path: PathBuf,
     default_font_size: f32,
     #[serde(skip)]
@@ -310,13 +315,53 @@ fn use_dark_red_accent(style: &mut Style) {
     style.visuals.selection.bg_fill = Color32::from_rgba_unmultiplied(241, 24, 14, 60);
 }
 
-pub fn setup_custom_style(ctx: &egui::Context) {
-    ctx.set_theme(Theme::Dark);
-    ctx.send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Dark));
-    ctx.set_visuals_of(Theme::Dark, egui::Visuals::dark());
-    ctx.set_visuals_of(Theme::Light, egui::Visuals::dark());
-    ctx.style_mut_of(Theme::Dark, use_dark_red_accent);
-    ctx.style_mut_of(Theme::Light, use_dark_red_accent);
+fn use_light_pink_acent(style: &mut Style) {
+    style.visuals.hyperlink_color = Color32::from_hex("#ffb6c1").expect("Invalid color");
+    style.visuals.text_cursor.stroke.color = Color32::from_hex("#ad1aa4").unwrap();
+    style.visuals.selection = Selection {
+        bg_fill: Color32::from_rgba_unmultiplied(237, 12, 211, 60),
+        stroke: Stroke::new(1.0_f32, Color32::from_hex("#000000").unwrap()),
+    };
+
+    style.visuals.selection.bg_fill = Color32::from_rgba_unmultiplied(237, 12, 211, 60);
+}
+pub fn setup_custom_style(ctx: &egui::Context, pink: bool) {
+    let accent = if pink { PINK } else { RED };
+
+    let mut visuals = if pink {
+        egui::Visuals::light()
+    } else {
+        egui::Visuals::dark()
+    };
+
+    visuals.hyperlink_color = accent;
+    visuals.text_cursor.stroke.color = accent;
+
+    visuals.selection = Selection {
+        bg_fill: if pink {
+            Color32::from_rgb(255, 190, 220)
+        } else {
+            Color32::from_rgb(120, 20, 35)
+        },
+        stroke: Stroke::new(1.0, accent),
+    };
+
+    // makes basically every normal egui button follow the theme
+    visuals.widgets.inactive.weak_bg_fill = if pink {
+        Color32::from_rgb(255, 225, 238)
+    } else {
+        Color32::from_rgb(45, 45, 45)
+    };
+
+    visuals.widgets.hovered.weak_bg_fill = if pink {
+        Color32::from_rgb(255, 195, 220)
+    } else {
+        Color32::from_rgb(70, 35, 42)
+    };
+
+    visuals.widgets.active.weak_bg_fill = accent;
+
+    ctx.set_visuals(visuals);
 }
 
 fn set_custom_font_size(ctx: &egui::Context, size: f32) {
@@ -355,7 +400,6 @@ impl RepakModManager {
             game_path = path.join("~mods").clean();
             fs::create_dir_all(&game_path).unwrap();
         }
-        setup_custom_style(&cc.egui_ctx);
         let mut x = Self {
             game_path,
             default_font_size: 18.0,
@@ -365,6 +409,8 @@ impl RepakModManager {
             version: Some(VERSION.to_string()),
             ..Default::default()
         };
+        setup_custom_style(&cc.egui_ctx, x.pink_theme);
+
         x.set_game_pakchunk_path();
         set_custom_font_size(&cc.egui_ctx, x.default_font_size);
         x
@@ -788,7 +834,7 @@ impl RepakModManager {
                 Align2::CENTER_CENTER,
                 "Drop .pak files or mod folders here",
                 TextStyle::Heading.resolve(&ctx.style()),
-                Color32::WHITE,
+                if (self.pink_theme) {Color32::BLACK} else {Color32::WHITE},
             );
         }
         ScrollArea::horizontal()
@@ -1000,16 +1046,23 @@ impl RepakModManager {
                             None
                         };
                         let is_selected = self.current_pak_file_idx == Some(i);
-                        let row_fill = if is_selected {
-                            Color32::from_rgb(54, 28, 35)
-                        } else {
-                            Color32::from_rgb(35, 35, 35)
-                        };
-                        let row_stroke = if is_selected {
-                            Stroke::new(1.0_f32, RED_THEME_COLOR)
-                        } else {
-                            Stroke::new(1.0_f32, Color32::from_rgb(64, 64, 64))
-                        };
+let row_fill = match (self.pink_theme, is_selected) {
+    (true, true)   => Color32::from_rgb(255, 215, 230),
+    (true, false)  => Color32::from_rgb(255, 240, 247),
+    (false, true)  => Color32::from_rgb(54, 28, 35),
+    (false, false) => Color32::from_rgb(35, 35, 35),
+};
+
+let row_stroke = Stroke::new(
+    1.0,
+    if is_selected {
+        self.theme_accent()
+    } else if self.pink_theme {
+        Color32::from_rgb(235, 190, 210)
+    } else {
+        Color32::from_rgb(64, 64, 64)
+    },
+);
 
                         let mut toggler_clicked = false;
                         let row = egui::Frame::NONE
@@ -1026,7 +1079,7 @@ impl RepakModManager {
                                             .strong()
                                             .size(self.default_font_size);
                                         if failure_message.is_some() {
-                                            name_text = name_text.color(RED_THEME_COLOR);
+                                            name_text = name_text.color(self.theme_accent());
                                         }
                                         ui.add(
                                             Label::new(name_text)
@@ -1495,9 +1548,11 @@ impl RepakModManager {
                         .desired_width(120.0),
                 );
             });
-            let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
-                .fill(Color32::from_rgb(186, 31, 59))
-                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(255, 70, 105)));
+let accent = self.theme_accent();
+
+let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
+    .fill(accent)
+    .stroke(Stroke::new(1.0, accent));
             if ui.add(create_button).clicked() {
                 let tag = self.new_tag_name.trim().to_string();
                 if !tag.is_empty() {
@@ -1819,7 +1874,7 @@ impl RepakModManager {
             }
 
             debug!("Setting custom style");
-            setup_custom_style(&ctx.egui_ctx);
+            setup_custom_style(&ctx.egui_ctx, config.pink_theme);
             debug!("Setting font size: {}", config.default_font_size);
             set_custom_font_size(&ctx.egui_ctx, config.default_font_size);
 
@@ -2272,7 +2327,7 @@ impl RepakModManager {
                                         Button::new(
                                             RichText::new("Encrypt all").color(Color32::WHITE),
                                         )
-                                        .fill(RED_THEME_COLOR),
+                                        .fill(self.theme_accent()),
                                     )
                                     .clicked()
                                 {
@@ -2356,7 +2411,13 @@ impl RepakModManager {
             None => {}
         }
     }
-
+    fn theme_accent(&self) -> Color32 {
+        if self.pink_theme {
+            PINK
+        } else {
+            RED
+        }
+    }
     fn show_kawaii_runtime_window(&mut self, ctx: &egui::Context) {
         enum KawaiiAction {
             InstallDotNet,
@@ -2412,7 +2473,7 @@ impl RepakModManager {
                                         RichText::new("Switch to self-contained repak-gui")
                                             .color(Color32::WHITE),
                                     )
-                                    .fill(RED_THEME_COLOR),
+                                    .fill(self.theme_accent()),
                                 )
                                 .clicked()
                             {
@@ -2576,7 +2637,7 @@ impl RepakModManager {
                                             RichText::new("Update and restart")
                                                 .color(Color32::WHITE),
                                         )
-                                        .fill(RED_THEME_COLOR),
+                                        .fill(self.theme_accent()),
                                     )
                                     .clicked()
                                 {
@@ -2973,6 +3034,12 @@ impl RepakModManager {
                     ui.label("Make backups");
                     ui.add(ios_widget::toggle(&mut self.make_backups));
                 });
+
+                ui.horizontal(|ui| {
+                    ui.label("Pink");
+                    ui.add(ios_widget::toggle(&mut self.pink_theme));
+                    setup_custom_style(ui.ctx(), self.pink_theme);
+                });
             });
 
             if ui.button("Donate").clicked() {
@@ -3062,7 +3129,7 @@ impl RepakModManager {
                     };
 
                     let button = Button::new(RichText::new("Launch Game").color(Color32::WHITE))
-                        .fill(RED_THEME_COLOR)
+                        .fill(self.theme_accent())
                         .stroke(Stroke::new(1.0_f32, Color32::from_rgb(255, 86, 118)));
                     let response = ui
                         .add_enabled(launch_enabled, button)
@@ -3250,7 +3317,7 @@ impl eframe::App for RepakModManager {
         self.check_drop(ctx);
         if let Some(ref mut install_mod) = self.install_mod_dialog {
             if self.file_drop_viewport_open {
-                install_mod.new_mod_dialog(ctx, &mut self.file_drop_viewport_open);
+                install_mod.new_mod_dialog(ctx, &mut self.file_drop_viewport_open, self.pink_theme);
             }
         }
     }

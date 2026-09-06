@@ -2,6 +2,7 @@
 ## Version 3.9.1
 - Massively speed up repaking and encryption. Around ~22.39x for most mods. 
 - Add `File -> Encryption Check` option to manually show encryption pop.
+- Add pink theme. Select from `File -> Pink`
 
 ## Version 3.8.0
 - Fix mods not installing properly under a different load order suffix.
