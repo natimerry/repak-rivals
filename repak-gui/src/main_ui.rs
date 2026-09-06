@@ -2934,6 +2934,19 @@ impl RepakModManager {
                         }
                     }
                 }
+                if ui.button("Encryption Check").clicked() {
+                    self.encryption_prompt_evaluated = false;
+                    self.maybe_show_encryption_prompt();
+                    if !matches!(self.encryption_state, EncryptionUiState::Available(_)) {
+                        rfd::MessageDialog::new()
+                            .set_buttons(MessageButtons::Ok)
+                            .set_title("Nothing to do")
+                            .set_description("No mods need encryption")
+                            .show();
+                    }
+                    self.show_encryption_window(ui.ctx());
+                }
+
                 if ui.button("Quit").clicked() {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 }
