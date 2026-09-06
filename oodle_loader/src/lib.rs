@@ -62,36 +62,36 @@ mod oodle_lz {
 
     pub type Compress = unsafe extern "system" fn(
         compressor: Compressor,
-        rawBuf: *const u8,
-        rawLen: usize,
-        compBuf: *mut u8,
+        raw_buf: *const u8,
+        raw_len: usize,
+        comp_buf: *mut u8,
         level: CompressionLevel,
-        pOptions: *const (),
-        dictionaryBase: *const (),
+        p_options: *const (),
+        dictionary_base: *const (),
         lrm: *const (),
-        scratchMem: *mut u8,
-        scratchSize: usize,
+        scratch_mem: *mut u8,
+        scratch_size: usize,
     ) -> isize;
 
     pub type Decompress = unsafe extern "system" fn(
-        compBuf: *const u8,
-        compBufSize: usize,
-        rawBuf: *mut u8,
-        rawLen: usize,
-        fuzzSafe: u32,
-        checkCRC: u32,
+        comp_buf: *const u8,
+        comp_buf_size: usize,
+        raw_buf: *mut u8,
+        raw_len: usize,
+        fuzz_safe: u32,
+        check_crc: u32,
         verbosity: u32,
-        decBufBase: u64,
-        decBufSize: usize,
-        fpCallback: u64,
-        callbackUserData: u64,
-        decoderMemory: *mut u8,
-        decoderMemorySize: usize,
-        threadPhase: u32,
+        dec_buf_base: u64,
+        dec_buf_size: usize,
+        fp_callback: u64,
+        callback_user_data: u64,
+        decoder_memory: *mut u8,
+        decoder_memory_size: usize,
+        thread_phase: u32,
     ) -> isize;
 
     pub type GetCompressedBufferSizeNeeded =
-        unsafe extern "system" fn(compressor: Compressor, rawSize: usize) -> usize;
+        unsafe extern "system" fn(compressor: Compressor, raw_size: usize) -> usize;
 }
 
 struct OodlePlatform {

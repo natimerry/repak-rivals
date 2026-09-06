@@ -49,6 +49,3 @@ num_cpus = "1.17.0"
 [build-dependencies]
 winres = "0.1.12"
 
-
-[profile.dev.package.retoc]
-opt-level = 3

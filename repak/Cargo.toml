@@ -8,11 +8,6 @@ edition.workspace = true
 keywords.workspace = true
 
 
-[profile.release]
-panic = "abort"
-
-[profile.dev]
-panic = "abort"
 
 
 [features]
@@ -38,4 +33,3 @@ base64.workspace = true
 [dev-dependencies]
 base64 = { workspace = true }
 paste = "1.0.15"
-

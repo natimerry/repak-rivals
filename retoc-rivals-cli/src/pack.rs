@@ -336,6 +336,13 @@ fn pack_iostore_packages(
         return Ok(());
     }
 
+    if !args.kawaii_physics && !should_patch_default_hidden_mats(args) && should_repack_iostore(args) {
+        for package in packages {
+            pack_iostore_package(crypto, args, package, default_output, game_paks_dir)?;
+        }
+        return Ok(());
+    }
+
     let base_output_dir = args
         .output
         .clone()
@@ -388,6 +395,11 @@ fn pack_iostore_package(
     default_output: &Path,
     game_paks_dir: Option<&Path>,
 ) -> Result<(), String> {
+    if !args.kawaii_physics && !should_patch_default_hidden_mats(args) && should_repack_iostore(args) {
+        if repack_iostore_direct(crypto, args, package, default_output)? {
+            return Ok(());
+        }
+    }
     if !should_repack_iostore(args) {
         let output_dir = output_dir_for(args, default_output, &package.stem());
         let output = iostore_ops::copy_iostore_package(package, &output_dir, args.no_mod_suffix)?;
@@ -417,6 +429,28 @@ fn pack_iostore_package(
         &package.stem(),
         default_output,
     )
+}
+
+fn repack_iostore_direct(
+    crypto: &PackCrypto,
+    args: &PackArgs,
+    package: &IoStorePackage,
+    default_output: &Path,
+) -> Result<bool, String> {
+    let name = if args.no_mod_suffix { package.stem() } else { ensure_mod_name_suffix(&package.stem()) };
+    let output = output_dir_for(args, default_output, &package.stem()).join(format!("{name}.utoc"));
+    let result = retoc::repack_iostore(&package.utoc, &output, retoc_compression(args.compression),
+        args.obfuscate, Arc::new(retoc_pack_config(crypto.read_key.clone(), crypto.write_key.clone(), crypto.write_guid)));
+    let stats = match result {
+        Ok(stats) => stats,
+        Err(e) if e.is::<retoc::DirectRepackUnsupported>() => {
+            println!("Container requires the asset-rebuild path: {e}");
+            return Ok(false);
+        }
+        Err(e) => return Err(format!("Direct IoStore repack failed: {e:#}")),
+    };
+    println!("Repacked {} directly: {} blocks reused, {} recompressed", output.display(), stats.reused_blocks, stats.recompressed_blocks);
+    Ok(true)
 }
 
 fn repack_legacy_pak(

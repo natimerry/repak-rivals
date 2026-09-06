@@ -169,6 +169,13 @@ fn repack_iostore_via_fast_extract(
     patch_default_hidden_materials: bool,
     default_hidden_material_bitmaps: Option<&[u64]>,
 ) -> Result<(), repak::Error> {
+    if !kawaii_porter && !patch_default_hidden_materials && default_hidden_material_bitmaps.is_none()
+        && !installable_mod.fix_mesh
+    {
+        if iotoc::repack_iostore_direct(installable_mod, output_mod_dir, installed_mods_ptr.clone())? {
+            return Ok(());
+        }
+    }
     let chunkdir = chunkdir.clone().ok_or_else(|| {
         repak::Error::Io(std::io::Error::other(
             "Cannot repack IoStore mod without detected game Paks directory",
@@ -247,7 +254,7 @@ pub fn fix_installed_iostore_kawaii_physics(
 
     let target_mod_directory = installable_mod.mod_path.parent().unwrap_or(mod_directory);
 
-    if (make_backups) {
+    if make_backups {
         backup_existing_mod_files(
             target_mod_directory,
             &installable_mod.mod_name,
@@ -292,7 +299,7 @@ pub fn patch_installed_iostore_default_hidden_materials(
 
     let target_mod_directory = installable_mod.mod_path.parent().unwrap_or(mod_directory);
 
-    if (make_backups) {
+    if make_backups {
         backup_existing_mod_files(
             target_mod_directory,
             &installable_mod.mod_name,
@@ -335,7 +342,7 @@ pub fn encrypt_installed_iostore_mod(
 
     let target_mod_directory = installable_mod.mod_path.parent().unwrap_or(mod_directory);
 
-    if (make_backups) {
+    if make_backups {
         backup_existing_mod_files(
             target_mod_directory,
             &installable_mod.mod_name,
@@ -518,6 +525,39 @@ pub fn install_mods_in_viewport(
 #[cfg(test)]
 mod tests {
     use super::{backup_existing_mod_files, copy_fixed_iostore_files, ensure_mod_name_suffix};
+
+    /// Real GUI pipeline and logging, writing only to temporary output directories.
+    #[test]
+    #[ignore = "requires RETOC_BENCH_MOD, RETOC_BENCH_GAME and RETOC_BENCH_USMAP"]
+    fn benchmark_iostore_workflow() {
+        use super::*;
+        let input = PathBuf::from(std::env::var_os("RETOC_BENCH_MOD").expect("RETOC_BENCH_MOD"));
+        let game = PathBuf::from(std::env::var_os("RETOC_BENCH_GAME").expect("RETOC_BENCH_GAME"));
+        let usmap = PathBuf::from(std::env::var_os("RETOC_BENCH_USMAP").expect("RETOC_BENCH_USMAP"));
+        let logs = tempfile::tempdir().unwrap();
+        let _guard = crate::init_tracing(&logs.path().join("benchmark.log"));
+        let expected = crate::utoc_utils::read_utoc_package_names(&input.with_extension("utoc")).unwrap();
+        for (run, patches) in [true, true, false].into_iter().enumerate() {
+            let output = tempfile::tempdir().unwrap();
+            let installable = InstallableMod {
+                mod_name: input.file_stem().unwrap().to_string_lossy().into_owned(),
+                mod_path: input.clone(), iostore: true, repak: true, encrypted: true,
+                kawaii_porter: patches, default_hidden_material_patch: patches,
+                mount_point: "../../../".into(), path_hash_seed: "00000000".into(),
+                total_files: expected.len(), ..Default::default()
+            };
+            let start = std::time::Instant::now();
+            repack_iostore_via_fast_extract(&installable, output.path(), input.parent().unwrap(),
+                Arc::new(AtomicI32::new(0)), &Some(game.clone()), &Some(usmap.clone()), patches, patches, None).unwrap();
+            println!("WORKFLOW_BENCH run={} patches={} encrypted=true elapsed_ms={}", run + 1, patches, start.elapsed().as_millis());
+            let utoc = output.path().join(format!("{}.utoc", ensure_mod_name_suffix(&installable.mod_name)));
+            let mut actual = crate::utoc_utils::read_utoc_package_names(&utoc).unwrap();
+            let mut expected = expected.clone();
+            actual.sort(); expected.sort();
+            assert_eq!(actual, expected);
+            assert!(crate::utoc_utils::is_iostore_obfuscated(&utoc).unwrap());
+        }
+    }
 
     #[test]
     fn existing_numeric_priority_suffix_is_preserved() {

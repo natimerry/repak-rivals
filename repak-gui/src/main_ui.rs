@@ -3280,13 +3280,13 @@ fn update_window_size(ctx: &egui::Context) -> egui::Vec2 {
 fn update_window_frame(ctx: &egui::Context) -> egui::Frame {
     egui::Frame::window(&ctx.style())
         .fill(Color32::from_rgb(24, 24, 28))
-        .stroke(Stroke::new(1.0, Color32::from_rgb(82, 34, 44)))
+        .stroke(Stroke::new(1.0_f32, Color32::from_rgb(82, 34, 44)))
 }
 
 fn kawaii_runtime_window_frame(ctx: &egui::Context) -> egui::Frame {
     egui::Frame::window(&ctx.style())
         .fill(Color32::from_rgba_unmultiplied(28, 28, 32, 255))
-        .stroke(Stroke::new(1.0, Color32::from_rgb(124, 44, 58)))
+        .stroke(Stroke::new(1.0_f32, Color32::from_rgb(124, 44, 58)))
 }
 
 fn update_window_layout(ui: &egui::Ui) -> (f32, f32, f32) {

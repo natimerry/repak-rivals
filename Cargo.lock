@@ -3985,6 +3985,7 @@ dependencies = [
  "serde_with",
  "sha1",
  "strum",
+ "tempfile",
  "tracing",
  "typed-path",
  "ue_reflection",

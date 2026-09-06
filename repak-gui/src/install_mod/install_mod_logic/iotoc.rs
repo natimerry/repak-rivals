@@ -145,42 +145,6 @@ fn to_legacy_config() -> Result<Arc<retoc::Config>, repak::Error> {
     Ok(Arc::new(config))
 }
 
-fn hardlink_iostore_container(src_utoc: &Path, dst_dir: &Path) -> Result<(), repak::Error> {
-    let stem = src_utoc
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .ok_or_else(|| {
-            repak::Error::Io(std::io::Error::other(format!(
-                "Invalid IoStore container filename: {}",
-                src_utoc.display()
-            )))
-        })?;
-
-    for ext in ["utoc", "ucas"] {
-        let src = src_utoc.with_extension(ext);
-        if !src.exists() {
-            continue;
-        }
-        let dst = dst_dir.join(format!("{stem}.{ext}"));
-        if let Err(link_error) = std::fs::hard_link(&src, &dst) {
-            debug!(
-                src = %src.display(),
-                dst = %dst.display(),
-                error = %link_error,
-                "Falling back to copying IoStore container"
-            );
-            std::fs::copy(&src, &dst).map_err(|copy_error| {
-                repak::Error::Io(std::io::Error::other(format!(
-                    "Failed to hardlink or copy {} to {}: hardlink: {link_error}; copy: {copy_error}",
-                    src.display(),
-                    dst.display()
-                )))
-            })?;
-        }
-    }
-
-    Ok(())
-}
 
 fn should_open_fast_game_container(path: &Path) -> bool {
     let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
@@ -191,28 +155,6 @@ fn should_open_fast_game_container(path: &Path) -> bool {
         || (stem_lower.starts_with("pakchunk") && stem_lower.contains("character"))
 }
 
-fn prepare_fast_to_legacy_input(
-    selected_utoc: &Path,
-    mods_dir: &Path,
-    game_paks_dir: &Path,
-) -> Result<tempfile::TempDir, repak::Error> {
-    let temp_dir = tempfile::tempdir_in(game_paks_dir).map_err(repak::Error::Io)?;
-    let temp_path = temp_dir.path();
-
-    debug!(mods_dir = %mods_dir.display(), selected_utoc = %selected_utoc.display(), "Preparing fast to-legacy input");
-    hardlink_iostore_container(selected_utoc, temp_path)?;
-
-    for entry in std::fs::read_dir(game_paks_dir).map_err(repak::Error::Io)? {
-        let path = entry.map_err(repak::Error::Io)?.path();
-        if path.extension().and_then(|ext| ext.to_str()) == Some("utoc")
-            && should_open_fast_game_container(&path)
-        {
-            hardlink_iostore_container(&path, temp_path)?;
-        }
-    }
-
-    Ok(temp_dir)
-}
 
 fn collect_fast_to_legacy_inputs(
     mod_utocs: impl IntoIterator<Item = PathBuf>,
@@ -238,6 +180,43 @@ fn collect_fast_to_legacy_inputs(
     }
 
     Ok(inputs)
+}
+
+pub fn repack_iostore_direct(
+    pak: &InstallableMod,
+    output_dir: &Path,
+    progress: Arc<AtomicI32>,
+) -> Result<bool, repak::Error> {
+    let base_progress = progress.load(Ordering::SeqCst);
+    let units = progress_units(pak.total_files).saturating_mul(2);
+    retoc::set_log_provider(Arc::new(TracingRetocLogProvider {
+        installed_assets: progress,
+        base_progress,
+        phase_units: units,
+        max_position: AtomicI32::new(0),
+    }));
+    let name = ensure_mod_name_suffix(&pak.mod_name);
+    let result = retoc::repack_iostore(
+        &pak.mod_path.with_extension("utoc"),
+        &output_dir.join(format!("{name}.utoc")),
+        Some(compression::CompressionMethod::Oodle),
+        pak.obfuscated || pak.encrypted,
+        to_legacy_config()?,
+    );
+    let stats = match result {
+        Ok(stats) => stats,
+        Err(e) if e.is::<retoc::DirectRepackUnsupported>() => {
+            info!("Container requires the asset-rebuild path: {e}");
+            return Ok(false);
+        }
+        Err(e) => return Err(repak::Error::Io(std::io::Error::other(format!("Direct IoStore repack failed: {e:#}")))),
+    };
+    let companion = output_dir.join(format!("{name}.pak"));
+    if companion.is_file() {
+        super::pak_files::rewrite_unsupported_companion_pak(&companion)?;
+    }
+    info!(reused_blocks = stats.reused_blocks, recompressed_blocks = stats.recompressed_blocks, "Direct IoStore repack complete");
+    Ok(true)
 }
 
 pub fn convert_directory_to_iostore(
@@ -608,21 +587,25 @@ fn to_legacy_uasset_fast_inner(
         "Prepared fast to-legacy filter"
     );
 
-    let input_dir =
-        prepare_fast_to_legacy_input(&pak.with_extension("utoc"), &mods_dir, &game_paks_dir)?;
+    // Open original paths so game metadata can be reused across operations. The
+    // batch API also pins extraction to the selected mod, preserving overrides.
+    let selected_utoc = pak.with_extension("utoc");
+    let inputs = collect_fast_to_legacy_inputs([selected_utoc.clone()], &game_paks_dir)?;
     let legacy_output_dir = output_dir.join(mod_stem);
     std::fs::create_dir_all(&legacy_output_dir).map_err(repak::Error::Io)?;
 
     std::thread::spawn({
-        let input_dir = input_dir.path().to_path_buf();
         let legacy_output_dir = legacy_output_dir.clone();
         move || {
             info!("retoc fast to-legacy started");
-            retoc::action_to_legacy(
-                ActionToLegacy {
-                    input: input_dir,
-                    output: legacy_output_dir,
-                    filter,
+            retoc::action_to_legacy_batch(
+                ActionToLegacyBatch {
+                    inputs,
+                    items: vec![ActionToLegacyBatchItem {
+                        inputs: vec![selected_utoc],
+                        output: legacy_output_dir,
+                        filter,
+                    }],
                     no_assets: false,
                     no_shaders: false,
                     no_compres_shaders: true,
