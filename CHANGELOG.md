@@ -1,4 +1,7 @@
 # Changelog
+## Version 3.9.3
+- Fixed a bug with kawaiiporter.
+
 ## Version 3.9.1
 - Massively speed up repaking and encryption. Around ~22.39x for most mods. 
 - Add `File -> Encryption Check` option to manually show encryption pop.
