@@ -304,27 +304,6 @@ enum SelectedPakDetailsState {
     Failed { path: PathBuf, error: String },
 }
 
-fn use_dark_red_accent(style: &mut Style) {
-    style.visuals.hyperlink_color = Color32::from_hex("#f71034").expect("Invalid color");
-    style.visuals.text_cursor.stroke.color = Color32::from_hex("#941428").unwrap();
-    style.visuals.selection = Selection {
-        bg_fill: Color32::from_rgba_unmultiplied(241, 24, 14, 60),
-        stroke: Stroke::new(1.0_f32, Color32::from_hex("#000000").unwrap()),
-    };
-
-    style.visuals.selection.bg_fill = Color32::from_rgba_unmultiplied(241, 24, 14, 60);
-}
-
-fn use_light_pink_acent(style: &mut Style) {
-    style.visuals.hyperlink_color = Color32::from_hex("#ffb6c1").expect("Invalid color");
-    style.visuals.text_cursor.stroke.color = Color32::from_hex("#ad1aa4").unwrap();
-    style.visuals.selection = Selection {
-        bg_fill: Color32::from_rgba_unmultiplied(237, 12, 211, 60),
-        stroke: Stroke::new(1.0_f32, Color32::from_hex("#000000").unwrap()),
-    };
-
-    style.visuals.selection.bg_fill = Color32::from_rgba_unmultiplied(237, 12, 211, 60);
-}
 pub fn setup_custom_style(ctx: &egui::Context, pink: bool) {
     let accent = if pink { PINK } else { RED };
 
