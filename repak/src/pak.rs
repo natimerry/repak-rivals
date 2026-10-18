@@ -20,6 +20,7 @@ impl std::fmt::Debug for Hash {
 pub struct PakBuilder {
     key: super::Key,
     allowed_compression: Vec<Compression>,
+    full_directory_index: bool,
 }
 
 impl Default for PakBuilder {
@@ -33,7 +34,15 @@ impl PakBuilder {
         Self {
             key: Default::default(),
             allowed_compression: Default::default(),
+            full_directory_index: true,
         }
+    }
+    /// Controls whether written paks include a full directory index (on by default).
+    /// Without it the game still resolves files through the path hash index, but tools
+    /// can no longer list entry names.
+    pub fn full_directory_index(mut self, enabled: bool) -> Self {
+        self.full_directory_index = enabled;
+        self
     }
     #[cfg(feature = "encryption")]
     pub fn key(mut self, key: aes::Aes256) -> Self {
@@ -62,14 +71,16 @@ impl PakBuilder {
         mount_point: String,
         path_hash_seed: Option<u64>,
     ) -> PakWriter<W> {
-        PakWriter::new_inner(
+        let mut writer = PakWriter::new_inner(
             writer,
             self.key,
             version,
             mount_point,
             path_hash_seed,
             self.allowed_compression,
-        )
+        );
+        writer.pak.write_full_directory_index = self.full_directory_index;
+        writer
     }
 }
 
@@ -96,6 +107,8 @@ pub(crate) struct Pak {
     encrypted_index: bool,
     encryption_guid: Option<u128>,
     compression: Vec<Option<Compression>>,
+    has_full_directory_index: bool,
+    write_full_directory_index: bool,
 }
 
 impl Pak {
@@ -107,6 +120,8 @@ impl Pak {
             index: Index::new(path_hash_seed),
             encrypted_index: false,
             encryption_guid: None,
+            has_full_directory_index: true,
+            write_full_directory_index: true,
             compression: (if version.version_major() < VersionMajor::FNameBasedCompression {
                 vec![
                     Some(Compression::Zlib),
@@ -124,6 +139,9 @@ impl Pak {
 pub(crate) struct Index {
     path_hash_seed: Option<u64>,
     entries: BTreeMap<String, super::entry::Entry>,
+    /// Entries only reachable through the path hash index (no name in a full directory
+    /// index), keyed by path hash. Kept so rewriting the pak does not drop them.
+    unnamed_entries: BTreeMap<u64, super::entry::Entry>,
 }
 
 impl Index {
@@ -219,6 +237,43 @@ impl PakReader {
 
     pub fn files(&self) -> Vec<String> {
         self.pak.index.entries().keys().cloned().collect()
+    }
+
+    /// Whether the pak was written with a full directory index. Paks without one only
+    /// expose names for entries recovered through [`PakReader::resolve_paths`].
+    pub fn has_full_directory_index(&self) -> bool {
+        self.pak.has_full_directory_index
+    }
+
+    /// Path hashes of entries whose names are not known yet.
+    pub fn unresolved_path_hashes(&self) -> Vec<u64> {
+        self.pak.index.unnamed_entries.keys().copied().collect()
+    }
+
+    /// Hashes candidate paths with this pak's seed and names every hash-only entry that
+    /// matches. Candidates may be relative to the mount point or rooted at `../../../`.
+    /// Returns how many entries were named.
+    pub fn resolve_paths<'a>(&mut self, candidates: impl IntoIterator<Item = &'a str>) -> usize {
+        let seed = self.pak.index.path_hash_seed.unwrap_or_default();
+        let mut resolved = 0;
+        for candidate in candidates {
+            if self.pak.index.unnamed_entries.is_empty() {
+                break;
+            }
+            let Some(path) = path_relative_to_mount(&self.pak.mount_point, candidate) else {
+                continue;
+            };
+            if let Some(entry) = self
+                .pak
+                .index
+                .unnamed_entries
+                .remove(&fnv64_path(&path, seed))
+            {
+                self.pak.index.entries.insert(path, entry);
+                resolved += 1;
+            }
+        }
+        resolved
     }
 
     pub fn get_file_entry(&self, path: &str) -> Result<Entry, Error> {
@@ -332,6 +387,28 @@ impl<W: Write + Seek> PakWriter<W> {
     }
 }
 
+/// The path hash the engine uses to look up `path` (relative to the pak's mount point).
+pub fn path_hash(path: &str, seed: u64) -> u64 {
+    fnv64_path(path, seed)
+}
+
+fn path_relative_to_mount(mount_point: &str, candidate: &str) -> Option<String> {
+    let normalize = |path: &str| {
+        let path = path.replace('\\', "/");
+        let path = path.trim_start_matches("../../../").trim_start_matches('/');
+        path.to_string()
+    };
+    let mount = normalize(mount_point);
+    let mount = mount.trim_end_matches('/');
+    let candidate = normalize(candidate);
+    if mount.is_empty() {
+        return Some(candidate);
+    }
+    let rest = candidate.get(mount.len()..)?;
+    (candidate[..mount.len()].eq_ignore_ascii_case(mount) && rest.starts_with('/'))
+        .then(|| rest.trim_start_matches('/').to_string())
+}
+
 fn root_path(mount_point: &str, path: &str) -> String {
     let path = format!("{}/{}", mount_point, path);
 
@@ -407,12 +484,13 @@ impl Pak {
         let mut index = io::Cursor::new(index);
         let mount_point = index.read_string()?;
         let len = index.read_u32::<LE>()? as usize;
+        // Pre-path-hash-index paks list every entry by name in the primary index.
+        let mut has_full_directory_index = true;
 
         let index = if version.version_major() >= VersionMajor::PathHashIndex {
             let path_hash_seed = index.read_u64::<LE>()?;
 
-            // Left in for potential desire to verify path index hashes.
-            let _path_hash_index = if index.read_u32::<LE>()? != 0 {
+            let path_hash_index = if index.read_u32::<LE>()? != 0 {
                 let path_hash_index_offset = index.read_u64::<LE>()?;
                 let path_hash_index_size = index.read_u64::<LE>()?;
                 let _path_hash_index_hash = index.read_len(20)?;
@@ -481,12 +559,13 @@ impl Pak {
             let encoded_entries = index.read_len(size)?;
 
             let mut entries_by_path = BTreeMap::new();
+            let mut named_offsets = std::collections::HashSet::new();
+            let mut encoded_entries = io::Cursor::new(&encoded_entries);
             if let Some(fdi) = &full_directory_index {
-                let mut encoded_entries = io::Cursor::new(&encoded_entries);
                 for (dir_name, dir) in fdi {
                     for (file_name, encoded_offset) in dir {
                         if *encoded_offset == 0x80000000 {
-                            println!("{file_name:?} has invalid offset: 0x{encoded_offset:08x}");
+                            // Directory index entry without an encoded record; nothing to read.
                             continue;
                         }
                         encoded_entries.seek(io::SeekFrom::Start(*encoded_offset as u64))?;
@@ -497,16 +576,31 @@ impl Pak {
                             dir_name.strip_prefix('/').unwrap_or(dir_name),
                             file_name
                         );
+                        named_offsets.insert(*encoded_offset);
                         entries_by_path.insert(path, entry);
                     }
                 }
             }
 
+            // Entries the full directory index does not name (or every entry, when the pak
+            // has no full directory index) are only reachable through their path hash.
+            let mut unnamed_entries = BTreeMap::new();
+            for (hash, encoded_offset) in path_hash_index.unwrap_or_default() {
+                if encoded_offset & 0x80000000 != 0 || named_offsets.contains(&encoded_offset) {
+                    continue;
+                }
+                encoded_entries.seek(io::SeekFrom::Start(encoded_offset as u64))?;
+                let entry = super::entry::Entry::read_encoded(&mut encoded_entries, version)?;
+                unnamed_entries.insert(hash, entry);
+            }
+
             assert_eq!(index.read_u32::<LE>()?, 0, "remaining index bytes are 0"); // TODO possibly remaining unencoded entries?
 
+            has_full_directory_index = full_directory_index.is_some();
             Index {
                 path_hash_seed: Some(path_hash_seed),
                 entries: entries_by_path,
+                unnamed_entries,
             }
         } else {
             let mut entries = BTreeMap::new();
@@ -519,6 +613,7 @@ impl Pak {
             Index {
                 path_hash_seed: None,
                 entries,
+                unnamed_entries: BTreeMap::new(),
             }
         };
 
@@ -530,6 +625,8 @@ impl Pak {
             encrypted_index: footer.encrypted,
             encryption_guid: footer.encryption_uuid,
             compression: footer.compression,
+            has_full_directory_index,
+            write_full_directory_index: has_full_directory_index,
         })
     }
 
@@ -557,19 +654,25 @@ impl Pak {
             }
             None
         } else {
-            let record_count = self.index.entries.len() as u32;
+            let record_count =
+                (self.index.entries.len() + self.index.unnamed_entries.len()) as u32;
             let path_hash_seed = self.index.path_hash_seed.unwrap_or_default();
             index_writer.write_u32::<LE>(record_count)?;
             index_writer.write_u64::<LE>(path_hash_seed)?;
 
-            let (encoded_entries, offsets) = {
+            let (encoded_entries, offsets, unnamed_offsets) = {
                 let mut offsets = Vec::with_capacity(self.index.entries.len());
+                let mut unnamed_offsets = Vec::with_capacity(self.index.unnamed_entries.len());
                 let mut encoded_entries = io::Cursor::new(vec![]);
                 for entry in self.index.entries.values() {
                     offsets.push(encoded_entries.get_ref().len() as u32);
                     entry.write_encoded(&mut encoded_entries)?;
                 }
-                (encoded_entries.into_inner(), offsets)
+                for (hash, entry) in &self.index.unnamed_entries {
+                    unnamed_offsets.push((*hash, encoded_entries.get_ref().len() as u32));
+                    entry.write_encoded(&mut encoded_entries)?;
+                }
+                (encoded_entries.into_inner(), offsets, unnamed_offsets)
             };
 
             // The index is organized sequentially as:
@@ -601,8 +704,10 @@ impl Pak {
                 size += 4; // record count
                 size += 4; // has path hash index (since we're generating, always true)
                 size += 8 + 8 + 20; // path hash index offset, size and hash
-                size += 4; // has full directory index (since we're generating, always true)
-                size += 8 + 8 + 20; // full directory index offset, size and hash
+                size += 4; // has full directory index
+                if self.write_full_directory_index {
+                    size += 8 + 8 + 20; // full directory index offset, size and hash
+                }
                 size += 4; // encoded entry size
                 size += encoded_entries.len() as u64;
                 size += 4; // unused file count
@@ -622,6 +727,7 @@ impl Pak {
                 path_hash_seed,
                 &self.index.entries,
                 &offsets,
+                &unnamed_offsets,
             )?;
 
             #[cfg(feature = "encryption")]
@@ -637,12 +743,14 @@ impl Pak {
             let full_directory_index_offset = path_hash_index_offset + phi_buf.len() as u64;
 
             let mut fdi_buf = vec![];
-            let mut fdi_writer = io::Cursor::new(&mut fdi_buf);
-            generate_full_directory_index(&mut fdi_writer, &self.index.entries, &offsets)?;
+            if self.write_full_directory_index {
+                let mut fdi_writer = io::Cursor::new(&mut fdi_buf);
+                generate_full_directory_index(&mut fdi_writer, &self.index.entries, &offsets)?;
 
-            #[cfg(feature = "encryption")]
-            if let crate::Key::Some(_) = key {
-                crate::data::pad_zeros_to_alignment(&mut fdi_buf, 16);
+                #[cfg(feature = "encryption")]
+                if let crate::Key::Some(_) = key {
+                    crate::data::pad_zeros_to_alignment(&mut fdi_buf, 16);
+                }
             }
             let fdi_hash = hash(&fdi_buf);
             #[cfg(feature = "encryption")]
@@ -655,10 +763,14 @@ impl Pak {
             index_writer.write_u64::<LE>(phi_buf.len() as u64)?; // path hash index size
             index_writer.write_all(&phi_hash.0)?;
 
-            index_writer.write_u32::<LE>(1)?; // we have full directory index
-            index_writer.write_u64::<LE>(full_directory_index_offset)?;
-            index_writer.write_u64::<LE>(fdi_buf.len() as u64)?; // path hash index size
-            index_writer.write_all(&fdi_hash.0)?;
+            if self.write_full_directory_index {
+                index_writer.write_u32::<LE>(1)?; // we have full directory index
+                index_writer.write_u64::<LE>(full_directory_index_offset)?;
+                index_writer.write_u64::<LE>(fdi_buf.len() as u64)?; // full directory index size
+                index_writer.write_all(&fdi_hash.0)?;
+            } else {
+                index_writer.write_u32::<LE>(0)?; // no full directory index
+            }
 
             index_writer.write_u32::<LE>(encoded_entries.len() as u32)?;
             index_writer.write_all(&encoded_entries)?;
@@ -728,11 +840,16 @@ fn generate_path_hash_index<W: Write>(
     path_hash_seed: u64,
     entries: &BTreeMap<String, super::entry::Entry>,
     offsets: &Vec<u32>,
+    unnamed_offsets: &[(u64, u32)],
 ) -> Result<(), super::Error> {
-    writer.write_u32::<LE>(entries.len() as u32)?;
+    writer.write_u32::<LE>((entries.len() + unnamed_offsets.len()) as u32)?;
     for (path, offset) in entries.keys().zip(offsets) {
         let path_hash = fnv64_path(path, path_hash_seed);
         writer.write_u64::<LE>(path_hash)?;
+        writer.write_u32::<LE>(*offset)?;
+    }
+    for (path_hash, offset) in unnamed_offsets {
+        writer.write_u64::<LE>(*path_hash)?;
         writer.write_u32::<LE>(*offset)?;
     }
 
@@ -824,5 +941,104 @@ mod test {
         assert_eq!(split_path_child("a//"), Some(("a/", "")));
         assert_eq!(split_path_child("/"), None);
         assert_eq!(split_path_child(""), None);
+    }
+
+    #[test]
+    fn test_path_relative_to_mount() {
+        let rel = |mount, path| path_relative_to_mount(mount, path);
+        assert_eq!(
+            rel("../../../", "Marvel/Content/WwiseAudio/a.bnk").as_deref(),
+            Some("Marvel/Content/WwiseAudio/a.bnk")
+        );
+        assert_eq!(
+            rel("../../../Marvel/Content/WwiseAudio/", "../../../Marvel/Content/WwiseAudio/a.bnk")
+                .as_deref(),
+            Some("a.bnk")
+        );
+        assert_eq!(rel("../../../Marvel/Content/Movies/", "Marvel/Content/WwiseAudio/a.bnk"), None);
+        assert_eq!(rel("../../../Marvel/Content/Wwise/", "Marvel/Content/WwiseAudio/a.bnk"), None);
+    }
+
+    #[cfg(feature = "encryption")]
+    fn test_key() -> aes::Aes256 {
+        use aes::cipher::KeyInit;
+        aes::Aes256::new_from_slice(&[7u8; 32]).unwrap()
+    }
+
+    #[cfg(feature = "encryption")]
+    fn write_test_pak(full_directory_index: bool, files: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut writer = PakBuilder::new()
+            .key(test_key())
+            .full_directory_index(full_directory_index)
+            .writer(io::Cursor::new(vec![]), Version::V11, "../../../".into(), Some(0));
+        for (path, data) in files {
+            writer.write_file(path, false, data).unwrap();
+        }
+        writer.write_index().unwrap().into_inner()
+    }
+
+    #[cfg(feature = "encryption")]
+    #[test]
+    fn test_pak_without_full_directory_index_resolves_by_hash() {
+        let path = "Marvel/Content/WwiseAudio/bnk_sfx_1031001.bnk";
+        let data = (0..20_000u32).map(|i| (i * 31) as u8).collect::<Vec<_>>();
+        let bytes = write_test_pak(false, &[(path, &data)]);
+
+        let mut reader = PakBuilder::new()
+            .key(test_key())
+            .reader(&mut io::Cursor::new(&bytes))
+            .unwrap();
+        assert!(!reader.has_full_directory_index());
+        assert!(reader.files().is_empty());
+        assert_eq!(reader.unresolved_path_hashes(), vec![path_hash(path, 0)]);
+
+        let resolved = reader.resolve_paths(["Marvel/Content/WwiseAudio/other.bnk", path]);
+        assert_eq!(resolved, 1);
+        assert!(reader.unresolved_path_hashes().is_empty());
+        assert_eq!(reader.files(), vec![path.to_string()]);
+        assert_eq!(reader.get(path, &mut io::Cursor::new(&bytes)).unwrap(), data);
+    }
+
+    #[cfg(feature = "encryption")]
+    #[test]
+    fn test_rewriting_pak_keeps_hash_only_entries() {
+        let hidden = "Marvel/Content/WwiseAudio/hidden.bnk";
+        let bytes = write_test_pak(false, &[(hidden, b"hidden bank")]);
+        let reader = PakBuilder::new()
+            .key(test_key())
+            .reader(&mut io::Cursor::new(&bytes))
+            .unwrap();
+
+        let mut rewritten = io::Cursor::new(bytes.clone());
+        let mut writer = reader.into_pakwriter(&mut rewritten).unwrap();
+        writer.write_file("Marvel/Content/WwiseAudio/added.bnk", false, b"added").unwrap();
+        writer.write_index().unwrap();
+        let rewritten = rewritten.into_inner();
+
+        let mut reader = PakBuilder::new()
+            .key(test_key())
+            .reader(&mut io::Cursor::new(&rewritten))
+            .unwrap();
+        assert!(!reader.has_full_directory_index());
+        assert_eq!(reader.unresolved_path_hashes().len(), 2);
+        assert_eq!(reader.resolve_paths([hidden]), 1);
+        assert_eq!(
+            reader.get(hidden, &mut io::Cursor::new(&rewritten)).unwrap(),
+            b"hidden bank"
+        );
+    }
+
+    #[cfg(feature = "encryption")]
+    #[test]
+    fn test_default_pak_still_lists_names() {
+        let path = "Marvel/Content/WwiseAudio/a.bnk";
+        let bytes = write_test_pak(true, &[(path, b"bank")]);
+        let reader = PakBuilder::new()
+            .key(test_key())
+            .reader(&mut io::Cursor::new(&bytes))
+            .unwrap();
+        assert!(reader.has_full_directory_index());
+        assert_eq!(reader.files(), vec![path.to_string()]);
+        assert!(reader.unresolved_path_hashes().is_empty());
     }
 }
