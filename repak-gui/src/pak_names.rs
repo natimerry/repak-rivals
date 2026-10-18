@@ -19,9 +19,16 @@ static CANDIDATES: Mutex<Option<(PathBuf, Arc<Vec<String>>)>> = Mutex::new(None)
 /// stripped without breaking the game's IoStore lookups).
 const CANDIDATE_PREFIXES: [&str; 2] = ["marvel/content/wwiseaudio/", "marvel/content/movies/"];
 
+/// Sets the game Paks directory and warms the path cache in the background, so the first
+/// stripped pak opened from the UI thread doesn't have to read the game paks.
 pub fn set_game_paks_dir(dir: Option<PathBuf>) {
     if let Ok(mut current) = GAME_PAKS_DIR.write() {
-        *current = dir;
+        *current = dir.clone();
+    }
+    if dir.is_some() {
+        std::thread::spawn(|| {
+            game_candidates();
+        });
     }
 }
 
@@ -59,9 +66,95 @@ fn game_candidates() -> Option<Arc<Vec<String>>> {
             return Some(candidates.clone());
         }
     }
-    let candidates = Arc::new(collect_candidates(&dir));
+    let signature = game_paks_signature(&dir);
+    let candidates = match load_disk_cache(&dir, &signature) {
+        Some(paths) => paths,
+        None => {
+            let paths = collect_candidates(&dir);
+            save_disk_cache(&dir, &signature, &paths);
+            paths
+        }
+    };
+    let candidates = Arc::new(candidates);
     *cache = Some((dir, candidates.clone()));
     Some(candidates)
+}
+
+/// Reading the game paks' directory indices is the slow part (the patch pak alone has
+/// over a million entries), so the collected paths are kept on disk next to the config and
+/// reused until the game paks change.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct DiskCache {
+    paks_dir: PathBuf,
+    signature: Vec<PakSignature>,
+    paths: Vec<String>,
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+struct PakSignature {
+    name: String,
+    size: u64,
+    modified_secs: u64,
+}
+
+fn disk_cache_path() -> Option<PathBuf> {
+    Some(dirs::config_dir()?.join("repak_manager").join("game_path_cache.json"))
+}
+
+fn game_paks_signature(dir: &Path) -> Vec<PakSignature> {
+    let mut signature = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("pak"))
+        .filter_map(|entry| {
+            let metadata = entry.metadata().ok()?;
+            let modified_secs = metadata
+                .modified()
+                .ok()?
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?
+                .as_secs();
+            Some(PakSignature {
+                name: entry.file_name().to_string_lossy().into_owned(),
+                size: metadata.len(),
+                modified_secs,
+            })
+        })
+        .collect::<Vec<_>>();
+    signature.sort_by(|a, b| a.name.cmp(&b.name));
+    signature
+}
+
+fn load_disk_cache(dir: &Path, signature: &[PakSignature]) -> Option<Vec<String>> {
+    let data = std::fs::read(disk_cache_path()?).ok()?;
+    let cache: DiskCache = serde_json::from_slice(&data).ok()?;
+    (cache.paks_dir == dir && cache.signature == signature).then(|| {
+        debug!(count = cache.paths.len(), "Loaded game paths from cache");
+        cache.paths
+    })
+}
+
+fn save_disk_cache(dir: &Path, signature: &[PakSignature], paths: &[String]) {
+    let Some(path) = disk_cache_path() else {
+        return;
+    };
+    let cache = DiskCache {
+        paks_dir: dir.to_path_buf(),
+        signature: signature.to_vec(),
+        paths: paths.to_vec(),
+    };
+    let result = serde_json::to_vec(&cache)
+        .map_err(std::io::Error::other)
+        .and_then(|data| {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&path, data)
+        });
+    if let Err(e) = result {
+        warn!(error = %e, "Failed to save game path cache");
+    }
 }
 
 fn collect_candidates(dir: &Path) -> Vec<String> {
