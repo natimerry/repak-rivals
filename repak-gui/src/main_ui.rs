@@ -204,6 +204,8 @@ struct ModEntry {
     obfuscated: String,
     encrypted: bool,
     outside_characters: bool,
+    /// Plain pak written without a full directory index (see `pak_names`).
+    stripped: bool,
     metadata_pending: bool,
     file_count: Option<usize>,
 }
@@ -223,6 +225,8 @@ struct ModMetadataCacheEntry {
     obfuscated: String,
     #[serde(default)]
     outside_characters: Option<bool>,
+    #[serde(default)]
+    stripped: Option<bool>,
     file_count: Option<usize>,
 }
 
@@ -243,6 +247,7 @@ struct MetadataResult {
     characteristic: String,
     obfuscated: String,
     outside_characters: bool,
+    stripped: bool,
     file_count: Option<usize>,
 }
 
@@ -531,13 +536,18 @@ impl RepakModManager {
 
             let cached = cache_by_identity
                 .get(&identity)
-                .filter(|entry| entry.signature == signature && entry.outside_characters.is_some());
-            let (category, characteristic, outside_characters, metadata_pending, file_count) =
+                .filter(|entry| {
+                    entry.signature == signature
+                        && entry.outside_characters.is_some()
+                        && entry.stripped.is_some()
+                });
+            let (category, characteristic, outside_characters, stripped, metadata_pending, file_count) =
                 match cached {
                     Some(entry) => (
                         entry.category.clone(),
                         entry.characteristic.clone(),
                         entry.outside_characters.unwrap_or(false),
+                        entry.stripped.unwrap_or(false),
                         false,
                         entry.file_count,
                     ),
@@ -553,6 +563,7 @@ impl RepakModManager {
                         (
                             "Pending".to_string(),
                             "Pending".to_string(),
+                            false,
                             false,
                             true,
                             None,
@@ -570,6 +581,7 @@ impl RepakModManager {
                 obfuscated,
                 encrypted,
                 outside_characters,
+                stripped,
                 metadata_pending,
                 file_count,
             });
@@ -688,6 +700,7 @@ impl RepakModManager {
             entry.characteristic = result.characteristic.clone();
             entry.obfuscated = result.obfuscated.clone();
             entry.outside_characters = result.outside_characters;
+            entry.stripped = result.stripped;
             entry.metadata_pending = false;
             entry.file_count = result.file_count;
         }
@@ -699,6 +712,7 @@ impl RepakModManager {
             characteristic: result.characteristic,
             obfuscated: result.obfuscated,
             outside_characters: Some(result.outside_characters),
+            stripped: Some(result.stripped),
             file_count: result.file_count,
         };
 
@@ -1013,7 +1027,10 @@ impl RepakModManager {
                         }
 
                         let is_iostore = self.pak_files[i].is_iostore;
-                        let failure_message = if !is_iostore {
+                        // Stripped audio paks are plain paks on purpose and load fine.
+                        let stripped_audio = self.pak_files[i].stripped
+                            && self.pak_files[i].category == "Audio";
+                        let failure_message = if !is_iostore && !stripped_audio {
                             Some(LEGACY_PAK_MESSAGE)
                         } else if self.pak_files[i].outside_characters
                             && !self.pak_files[i].encrypted
@@ -3405,7 +3422,7 @@ fn normalize_mod_display_name(name: &str) -> String {
 }
 
 fn classify_mod_metadata(job: &MetadataJob) -> Result<MetadataResult, String> {
-    let files = files_for_metadata(&job.path, job.is_iostore)?;
+    let (files, stripped) = files_for_metadata(&job.path, job.is_iostore)?;
     let file_count = Some(files.len());
     let outside_characters = job.is_iostore && touches_outside_characters_prefix(&files);
     Ok(MetadataResult {
@@ -3416,6 +3433,7 @@ fn classify_mod_metadata(job: &MetadataJob) -> Result<MetadataResult, String> {
         characteristic: get_current_pak_characteristics(files),
         obfuscated: job.obfuscated.clone(),
         outside_characters,
+        stripped,
         file_count,
     })
 }
@@ -3433,14 +3451,16 @@ fn touches_outside_characters_prefix(files: &[String]) -> bool {
     })
 }
 
-fn files_for_metadata(pak_path: &Path, is_iostore: bool) -> Result<Vec<String>, String> {
+/// Returns the mod's file names and whether it is a stripped (no full directory index) pak.
+fn files_for_metadata(pak_path: &Path, is_iostore: bool) -> Result<(Vec<String>, bool), String> {
     if is_iostore {
-        return read_utoc_package_names(&pak_path.with_extension("utoc"));
+        return read_utoc_package_names(&pak_path.with_extension("utoc"))
+            .map(|files| (files, false));
     }
 
     let pak =
         crate::pak_names::open_pak(pak_path).map_err(|e| format!("Failed to read mod: {e}"))?;
-    Ok(pak.files())
+    Ok((pak.files(), !pak.has_full_directory_index()))
 }
 
 fn mod_file_state(path: &Path) -> Option<(bool, bool)> {
