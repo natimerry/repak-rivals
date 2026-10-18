@@ -160,4 +160,42 @@ mod tests {
         let first_diff = original.iter().zip(&rewritten).position(|(a, b)| a != b);
         assert_eq!(first_diff, None, "first differing byte");
     }
+
+    /// Strips a real unstripped audio mod in place and checks every bank survives.
+    /// Run with UNSTRIPPED_PAK=<mod .pak> RIVALS_PAKS=<game Paks dir> cargo test -- --ignored
+    #[test]
+    #[ignore]
+    fn strips_installed_audio_mod_in_place() {
+        let (Ok(source), Ok(paks)) =
+            (std::env::var("UNSTRIPPED_PAK"), std::env::var("RIVALS_PAKS"))
+        else {
+            return;
+        };
+        set_game_paks_dir(Some(PathBuf::from(paks)));
+        let dir = tempfile::tempdir().unwrap();
+        let pak = dir.path().join("audio_9999999_P.pak");
+        std::fs::copy(source, &pak).unwrap();
+
+        let before = open_pak(&pak).unwrap();
+        let mut source = BufReader::new(File::open(&pak).unwrap());
+        let expected = before
+            .files()
+            .into_iter()
+            .filter(|f| !crate::install_mod::is_unsupported_companion_entry(before.mount_point(), f))
+            .map(|f| (before.get(&f, &mut source).unwrap(), f))
+            .collect::<Vec<_>>();
+        drop(source);
+
+        crate::install_mod::install_mod_logic::pak_files::strip_installed_pak(&pak, true).unwrap();
+        assert!(dir.path().join("audio_9999999_P.pak.rebak").exists());
+
+        let after = open_pak(&pak).unwrap();
+        assert!(!after.has_full_directory_index());
+        assert!(after.unresolved_path_hashes().is_empty(), "names not recovered");
+        let mut source = BufReader::new(File::open(&pak).unwrap());
+        for (data, file) in &expected {
+            assert_eq!(&after.get(file, &mut source).unwrap(), data, "{file}");
+        }
+        println!("stripped {} entries: {:?}", expected.len(), after.files());
+    }
 }

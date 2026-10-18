@@ -2,6 +2,7 @@ extern crate core;
 
 use crate::file_table::FileTable;
 use crate::install_mod::install_mod_logic::iotoc::{to_legacy_uasset, to_legacy_uasset_fast};
+use crate::install_mod::install_mod_logic::pak_files::strip_installed_pak;
 use crate::install_mod::{
     self, map_dropped_file_to_mods, map_paths_to_mods, InstallableMod, ModInstallRequest,
 };
@@ -50,6 +51,8 @@ const DEFAULT_HIDDEN_MATERIAL_CREATOR_SLOTS: usize = 32;
 const MAX_DEFAULT_HIDDEN_MATERIAL_SLOTS: usize = 64;
 const ENCRYPTION_REQUIRED_MESSAGE: &str = "these mods touch files outside of the /Game/Marvel/Characters prefix so they wont load without encryption";
 const LEGACY_PAK_MESSAGE: &str = "Wait for bypass xo";
+const UNSTRIPPED_AUDIO_MESSAGE: &str =
+    "This audio mod won't load yet. Right-click it and choose \"Strip audio mod\" to fix it.";
 // use eframe::egui::WidgetText::RichText;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1028,9 +1031,11 @@ impl RepakModManager {
 
                         let is_iostore = self.pak_files[i].is_iostore;
                         // Stripped audio paks are plain paks on purpose and load fine.
-                        let stripped_audio = self.pak_files[i].stripped
-                            && self.pak_files[i].category == "Audio";
-                        let failure_message = if !is_iostore && !stripped_audio {
+                        let is_audio = self.pak_files[i].category == "Audio";
+                        let stripped = self.pak_files[i].stripped;
+                        let failure_message = if !is_iostore && is_audio && !stripped {
+                            Some(UNSTRIPPED_AUDIO_MESSAGE)
+                        } else if !is_iostore && !is_audio {
                             Some(LEGACY_PAK_MESSAGE)
                         } else if self.pak_files[i].outside_characters
                             && !self.pak_files[i].encrypted
@@ -1246,6 +1251,36 @@ let row_stroke = Stroke::new(
             if response.clicked() {
                 ui.close_menu();
                 self.start_encrypt_mods(vec![pak_path.to_path_buf()]);
+            }
+            ui.separator();
+        }
+        let unstripped_audio = self.pak_files.get(i).is_some_and(|entry| {
+            !entry.is_iostore
+                && !entry.metadata_pending
+                && !entry.stripped
+                && entry.category == "Audio"
+        });
+        if unstripped_audio {
+            let response = ui
+                .button("Strip audio mod")
+                .on_hover_text("Rewrite this pak without a file list and uncompressed so it loads.");
+            if response.clicked() {
+                ui.close_menu();
+                match strip_installed_pak(pak_path, self.make_backups) {
+                    Ok(()) => {
+                        info!(path = %pak_path.display(), "Stripped installed audio mod");
+                        self.collect_pak_files();
+                    }
+                    Err(e) => {
+                        error!(path = %pak_path.display(), error = %e, "Failed to strip audio mod");
+                        rfd::MessageDialog::new()
+                            .set_buttons(MessageButtons::Ok)
+                            .set_level(rfd::MessageLevel::Error)
+                            .set_title("Couldn't strip audio mod")
+                            .set_description(format!("{e}"))
+                            .show();
+                    }
+                }
             }
             ui.separator();
         }

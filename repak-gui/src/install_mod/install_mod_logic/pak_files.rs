@@ -132,6 +132,73 @@ pub fn rewrite_unsupported_companion_pak(path: &Path) -> Result<bool, repak::Err
     Ok(true)
 }
 
+/// Rewrites an installed plain pak in place as a stripped pak: no full directory index and
+/// entries stored uncompressed. The original is renamed to `<name>.rebak` when `make_backup`.
+pub fn strip_installed_pak(path: &Path, make_backup: bool) -> Result<(), repak::Error> {
+    let reader = crate::pak_names::open_pak(path)?;
+    if reader.version() < Version::V10 {
+        return Err(repak::Error::Io(std::io::Error::other(
+            "Pak version is too old to be stripped (needs a path hash index)",
+        )));
+    }
+    let unnamed = reader.unresolved_path_hashes().len();
+    if unnamed > 0 {
+        return Err(repak::Error::Io(std::io::Error::other(format!(
+            "{unnamed} entries could not be named from the game files"
+        ))));
+    }
+
+    let files = reader.files();
+    let blockers = strip_blockers(reader.mount_point(), files.iter().map(String::as_str));
+    if !blockers.is_empty() {
+        return Err(repak::Error::Io(std::io::Error::other(format!(
+            "This pak has files other than audio banks, so it can't be stripped: {}",
+            summarize_strip_blockers(&blockers)
+        ))));
+    }
+
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut replacement = tempfile::NamedTempFile::new_in(parent).map_err(repak::Error::Io)?;
+    let mut writer = repak::PakBuilder::new()
+        .key(AES_KEY.clone().0)
+        .full_directory_index(false)
+        .writer(
+            BufWriter::new(replacement.as_file_mut()),
+            reader.version(),
+            reader.mount_point().to_string(),
+            reader.path_hash_seed(),
+        );
+    let mut source = BufReader::new(File::open(path)?);
+    for entry in reader.files() {
+        if crate::install_mod::is_unsupported_companion_entry(reader.mount_point(), &entry) {
+            continue;
+        }
+        let data = reader.get(&entry, &mut source)?;
+        writer.write_file(&entry, false, data)?;
+    }
+    writer.write_index()?.flush()?;
+    drop(source);
+    replacement.as_file().sync_all()?;
+
+    if make_backup {
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("mod.pak");
+        let mut backup = path.with_file_name(format!("{file_name}.rebak"));
+        let mut suffix = 1usize;
+        while backup.exists() {
+            backup = path.with_file_name(format!("{file_name}.{suffix}.rebak"));
+            suffix += 1;
+        }
+        fs::copy(path, &backup)?;
+    }
+    replacement
+        .persist(path)
+        .map_err(|error| repak::Error::Io(error.error))?;
+    Ok(())
+}
+
 pub fn extract_pak_to_dir(pak: &InstallableMod, install_dir: PathBuf) -> Result<(), repak::Error> {
     let pak_reader = pak.clone().reader.clone().unwrap();
 
@@ -406,5 +473,54 @@ mod tests {
         );
         let many = (1..=5).map(|i| format!("f{i}.ini")).collect::<Vec<_>>();
         assert_eq!(summarize_strip_blockers(&many), "f1.ini, f2.ini, f3.ini and 2 more");
+    }
+
+    #[test]
+    fn refuses_to_strip_paks_with_non_audio_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let write = |name: &str, files: &[&str]| {
+            let path = temp.path().join(name);
+            let mut writer = repak::PakBuilder::new().key(AES_KEY.clone().0).writer(
+                File::create(&path).unwrap(),
+                Version::V11,
+                "../../../".to_string(),
+                Some(0),
+            );
+            for file in files {
+                writer.write_file(file, false, b"data").unwrap();
+            }
+            writer.write_index().unwrap();
+            path
+        };
+
+        let mixed = write(
+            "mixed_9999999_P.pak",
+            &[
+                "Marvel/Content/WwiseAudio/a.bnk",
+                "Marvel/Config/DefaultEngine.ini",
+            ],
+        );
+        let before = std::fs::read(&mixed).unwrap();
+        let error = super::strip_installed_pak(&mixed, false)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("DefaultEngine.ini"), "{error}");
+        assert_eq!(std::fs::read(&mixed).unwrap(), before);
+
+        let audio = write(
+            "audio_9999999_P.pak",
+            &[
+                "Marvel/Content/WwiseAudio/a.bnk",
+                "Marvel/Content/WwiseAudio/Media/desktop.ini",
+            ],
+        );
+        super::strip_installed_pak(&audio, false).unwrap();
+        let mut reader = repak::PakBuilder::new()
+            .key(AES_KEY.clone().0)
+            .reader(&mut std::io::BufReader::new(File::open(&audio).unwrap()))
+            .unwrap();
+        assert!(!reader.has_full_directory_index());
+        assert_eq!(reader.resolve_paths(["Marvel/Content/WwiseAudio/a.bnk"]), 1);
+        assert_eq!(reader.files(), vec!["Marvel/Content/WwiseAudio/a.bnk"]);
     }
 }
