@@ -106,3 +106,58 @@ fn collect_candidates(dir: &Path) -> Vec<String> {
     candidates
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::install_mod::install_mod_logic::pak_files::repak_dir;
+    use crate::install_mod::InstallableMod;
+    use std::sync::atomic::AtomicI32;
+
+    /// Decodes a real stripped audio mod using the installed game's paks, then strips it
+    /// again and checks the output matches the original byte for byte.
+    /// Run with STRIPPED_PAK=<mod .pak> RIVALS_PAKS=<game Paks dir> cargo test -- --ignored
+    #[test]
+    #[ignore]
+    fn decodes_and_restrips_real_audio_mod() {
+        let (Ok(pak), Ok(paks)) = (std::env::var("STRIPPED_PAK"), std::env::var("RIVALS_PAKS"))
+        else {
+            return;
+        };
+        let pak = PathBuf::from(pak);
+        set_game_paks_dir(Some(PathBuf::from(paks)));
+
+        let reader = open_pak(&pak).unwrap();
+        assert!(!reader.has_full_directory_index());
+        assert!(reader.unresolved_path_hashes().is_empty());
+        let files = reader.files();
+        println!("recovered: {files:?}");
+
+        let raw = tempfile::tempdir().unwrap();
+        for file in &files {
+            let data = reader
+                .get(file, &mut BufReader::new(File::open(&pak).unwrap()))
+                .unwrap();
+            let out = raw.path().join(file);
+            std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+            std::fs::write(out, data).unwrap();
+        }
+
+        let out = tempfile::tempdir().unwrap();
+        let installable = InstallableMod {
+            mod_name: "restripped_9999999_P".into(),
+            mod_type: "Audio".into(),
+            strip_audio: true,
+            mount_point: reader.mount_point().into(),
+            path_hash_seed: reader.path_hash_seed().unwrap_or_default().to_string(),
+            total_files: files.len(),
+            ..Default::default()
+        };
+        repak_dir(&installable, raw.path().into(), out.path().into(), &AtomicI32::new(0)).unwrap();
+
+        let original = std::fs::read(&pak).unwrap();
+        let rewritten = std::fs::read(out.path().join("restripped_9999999_P.pak")).unwrap();
+        assert_eq!(original.len(), rewritten.len(), "size differs");
+        let first_diff = original.iter().zip(&rewritten).position(|(a, b)| a != b);
+        assert_eq!(first_diff, None, "first differing byte");
+    }
+}

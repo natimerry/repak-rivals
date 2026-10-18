@@ -51,6 +51,11 @@ pub struct InstallableMod {
     pub enabled: bool,
     pub obfuscated: bool,
     pub encrypted: bool,
+    /// Write audio paks like stripped community mods: no full directory index, stored
+    /// uncompressed. The game resolves files through the path hash index only.
+    pub strip_audio: bool,
+    /// Files that stop this mod from being stripped (anything but Wwise banks and media).
+    pub strip_blockers: Vec<String>,
     // Keeps extracted archive files alive while the install dialog/worker still references them.
     #[allow(dead_code)]
     pub extracted_archive_dir: Option<Arc<TempDir>>,
@@ -62,6 +67,8 @@ impl Default for InstallableMod {
         InstallableMod {
             obfuscated: false,
             encrypted: false,
+            strip_audio: false,
+            strip_blockers: Vec::new(),
             mod_name: "".to_string(),
             mod_type: "".to_string(),
             repak: false,
@@ -167,6 +174,43 @@ impl ModInstallRequest {
             kawaii_physics_usmap,
             show_terminal_progress: false,
         }
+    }
+
+    /// Pre-fills the per-mod "Strip audio mod" option from the global setting. Mods with
+    /// files other than audio banks are never stripped.
+    pub fn with_strip_audio_default(mut self, enabled: bool) -> Self {
+        for installable_mod in &mut self.mods {
+            installable_mod.strip_blockers = Self::find_strip_blockers(installable_mod);
+            installable_mod.strip_audio = enabled
+                && installable_mod.mod_type == "Audio"
+                && installable_mod.strip_blockers.is_empty();
+        }
+        self
+    }
+
+    fn find_strip_blockers(installable_mod: &InstallableMod) -> Vec<String> {
+        if installable_mod.mod_type != "Audio" || installable_mod.iostore {
+            return Vec::new();
+        }
+        let (mount_point, files) = match &installable_mod.reader {
+            Some(reader) => (reader.mount_point().to_string(), reader.files()),
+            None => {
+                let mut paths = Vec::new();
+                if collect_files(&mut paths, &installable_mod.mod_path).is_err() {
+                    return Vec::new();
+                }
+                let files = paths
+                    .iter()
+                    .filter_map(|path| path.strip_prefix(&installable_mod.mod_path).ok())
+                    .map(|path| path.to_string_lossy().replace('\\', "/"))
+                    .collect();
+                (installable_mod.mount_point.clone(), files)
+            }
+        };
+        install_mod_logic::pak_files::strip_blockers(
+            &mount_point,
+            files.iter().map(String::as_str),
+        )
     }
 }
 
@@ -473,6 +517,42 @@ impl ModInstallRequest {
                                 );
                                 if encrypt_response.changed() && mods.encrypted && mods.iostore {
                                     mods.repak = true;
+                                }
+
+                                let strip_enabled = mods.mod_type == "Audio"
+                                    && !mods.iostore
+                                    && (mods.is_dir || mods.repak)
+                                    && mods.strip_blockers.is_empty();
+                                ui.add_enabled(
+                                    strip_enabled,
+                                    Checkbox::new(&mut mods.strip_audio, "Strip audio mod"),
+                                )
+                                .on_hover_text(
+                                    "Write the .pak without a file list and without compression. \
+                                     The game still loads it, but other tools can no longer list \
+                                     its contents.",
+                                );
+                                if !mods.strip_blockers.is_empty() {
+                                    ui.colored_label(
+                                        egui::Color32::YELLOW,
+                                        format!(
+                                            "Can't strip: the mod has files other than audio banks ({}).",
+                                            install_mod_logic::pak_files::summarize_strip_blockers(&mods.strip_blockers)
+                                        ),
+                                    );
+                                }
+                                let unnamed = mods
+                                    .reader
+                                    .as_ref()
+                                    .map_or(0, |reader| reader.unresolved_path_hashes().len());
+                                if unnamed > 0 {
+                                    ui.colored_label(
+                                        egui::Color32::YELLOW,
+                                        format!(
+                                            "{unnamed} stripped entries could not be named from \
+                                             the game files; this pak will be installed as-is."
+                                        ),
+                                    );
                                 }
 
                                 let text_edit = TextEdit::singleline(&mut mods.mount_point);

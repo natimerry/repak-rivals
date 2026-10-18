@@ -178,6 +178,9 @@ pub struct RepakModManager {
 
     #[serde(default = "default_true")]
     make_backups: bool,
+
+    #[serde(default = "default_true")]
+    strip_audio_mods: bool,
 }
 
 fn default_true() -> bool {
@@ -380,6 +383,7 @@ impl RepakModManager {
         let mut x = Self {
             game_path,
             default_font_size: 18.0,
+            strip_audio_mods: true,
             pak_files: vec![],
             current_pak_file_idx: None,
             table: None,
@@ -1387,6 +1391,8 @@ let row_stroke = Stroke::new(
                     enabled: true,
                     obfuscated: false,
                     encrypted: false,
+                    strip_audio: false,
+                    strip_blockers: Vec::new(),
                     extracted_archive_dir: None,
                 }
             };
@@ -2129,6 +2135,8 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
             enabled: entry.enabled,
             obfuscated: entry.obfuscated.eq_ignore_ascii_case("true"),
             encrypted: true,
+            strip_audio: false,
+            strip_blockers: Vec::new(),
             extracted_archive_dir: None,
         })
     }
@@ -2854,7 +2862,8 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
                         self.game_path.clone(),
                         &self.game_chunk_path,
                         &self.kawaii_physics_usmap,
-                    ));
+                    )
+                    .with_strip_audio_default(self.strip_audio_mods));
 
                     if let Some(dialog) = &self.install_mod_dialog {
                         trace!("Install dialog payload: {:#?}", dialog.mods);
@@ -2905,7 +2914,8 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
                         self.game_path.clone(),
                         &self.game_chunk_path,
                         &self.kawaii_physics_usmap,
-                    ));
+                    )
+                    .with_strip_audio_default(self.strip_audio_mods));
                 }
 
                 if ui
@@ -2940,7 +2950,8 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
                         self.game_path.clone(),
                         &self.game_chunk_path,
                         &self.kawaii_physics_usmap,
-                    ));
+                    )
+                    .with_strip_audio_default(self.strip_audio_mods));
                 }
                 ui.separator();
                 if ui.button("Select Mapping file").clicked() {
@@ -3006,6 +3017,22 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
                 ui.horizontal(|ui| {
                     ui.label("Make backups");
                     ui.add(ios_widget::toggle(&mut self.make_backups));
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Strip audio mods");
+                    if ui
+                        .add(ios_widget::toggle(&mut self.strip_audio_mods))
+                        .on_hover_text(
+                            "Pre-select \"Strip audio mod\" for audio mods: written without a \
+                             file list and uncompressed. You can still change it per mod.",
+                        )
+                        .changed()
+                    {
+                        if let Err(e) = self.save_state() {
+                            warn!(error = %e, "Failed to save strip-audio preference");
+                        }
+                    }
                 });
 
                 ui.horizontal(|ui| {

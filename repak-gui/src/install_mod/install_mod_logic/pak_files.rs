@@ -17,6 +17,79 @@ use tempfile::tempdir;
 
 use super::{ensure_mod_name_suffix, iotoc::convert_directory_to_iostore};
 
+/// Wwise content lives here; nothing else may be written into a stripped pak.
+const STRIPPABLE_ROOT: &str = "marvel/content/wwiseaudio/";
+const STRIPPABLE_EXTENSIONS: [&str; 2] = ["bnk", "wem"];
+
+/// Whether `entry` (relative to the pak's `mount_point`) is a Wwise bank or media file under
+/// `Marvel/Content/WwiseAudio/`. Stripped paks hide their file list, so Repak only writes
+/// one for content that can't be anything else.
+pub fn is_strippable_audio_entry(mount_point: &str, entry: &str) -> bool {
+    let entry = entry.replace('\\', "/");
+    let mut mount = mount_point.replace('\\', "/");
+    if entry.contains(':') || mount.contains(':') || entry.split('/').any(|part| part == "..") {
+        return false;
+    }
+    if !mount.ends_with('/') {
+        mount.push('/');
+    }
+    // The mount point is the only place a leading "../" is allowed.
+    let mut mount = mount.as_str();
+    while let Some(rest) = mount.strip_prefix("../") {
+        mount = rest;
+    }
+    let full = format!("{mount}/{entry}");
+    let parts = full
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect::<Vec<_>>();
+    if parts.contains(&"..") {
+        return false;
+    }
+    let Some(name) = parts.last() else {
+        return false;
+    };
+    parts
+        .join("/")
+        .to_ascii_lowercase()
+        .starts_with(STRIPPABLE_ROOT)
+        && Path::new(name)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                STRIPPABLE_EXTENSIONS
+                    .iter()
+                    .any(|allowed| extension.eq_ignore_ascii_case(allowed))
+            })
+}
+
+/// Entries that stop a pak from being stripped. Entries Repak drops from every pak anyway
+/// (`chunknames`, `patched_files`, `desktop.ini`) don't count.
+pub fn strip_blockers<'a>(
+    mount_point: &str,
+    entries: impl IntoIterator<Item = &'a str>,
+) -> Vec<String> {
+    entries
+        .into_iter()
+        .filter(|entry| !crate::install_mod::is_unsupported_companion_entry(mount_point, entry))
+        .filter(|entry| !is_strippable_audio_entry(mount_point, entry))
+        .map(str::to_string)
+        .collect()
+}
+
+pub fn summarize_strip_blockers(blockers: &[String]) -> String {
+    let shown = blockers
+        .iter()
+        .take(3)
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(", ");
+    match blockers.len().saturating_sub(3) {
+        0 => shown,
+        more => format!("{shown} and {more} more"),
+    }
+}
+
 pub fn pak_contains_unsupported_entries(path: &Path) -> Result<bool, repak::Error> {
     let reader = repak::PakBuilder::new()
         .key(AES_KEY.clone().0)
@@ -171,8 +244,38 @@ pub fn repak_dir(
 
     paths.sort();
 
+    // Stripped audio paks match community "stripped" mods: no full directory index and
+    // entries stored uncompressed; the game finds files through the path hash index.
+    let mut strip = pak.strip_audio && pak.mod_type == "Audio";
+    if strip {
+        let rels = paths
+            .iter()
+            .filter_map(|p| p.strip_prefix(&to_pak_dir).ok().and_then(|r| r.to_slash()))
+            .map(|r| r.into_owned())
+            .collect::<Vec<_>>();
+        let blockers = strip_blockers(&pak.mount_point, rels.iter().map(String::as_str));
+        if blockers.is_empty() {
+            // Entries Repak drops from every pak anyway never end up in a stripped one.
+            paths.retain(|p| {
+                !p.strip_prefix(&to_pak_dir)
+                    .ok()
+                    .and_then(|r| r.to_slash())
+                    .is_some_and(|rel| {
+                        crate::install_mod::is_unsupported_companion_entry(&pak.mount_point, &rel)
+                    })
+            });
+        } else {
+            log::warn!(
+                "Not stripping {}: it has files other than audio banks ({})",
+                pak.mod_name,
+                summarize_strip_blockers(&blockers)
+            );
+            strip = false;
+        }
+    }
     let builder = repak::PakBuilder::new()
-        .compression(vec![pak.compression])
+        .compression(if strip { vec![] } else { vec![pak.compression] })
+        .full_directory_index(!strip)
         .key(AES_KEY.clone().0);
 
     let mut pak_writer = builder.writer(
@@ -193,7 +296,7 @@ pub fn repak_dir(
                 .expect("failed to convert to slash path");
 
             let entry = entry_builder
-                .build_entry(true, std::fs::read(p).expect("WTF"), rel)
+                .build_entry(!strip, std::fs::read(p).expect("WTF"), rel)
                 .expect("Failed to build entry");
             (rel.to_string(), entry)
         })
@@ -205,7 +308,7 @@ pub fn repak_dir(
     }
     pak_writer.write_index()?;
 
-    log::info!("Wrote pak file successfully");
+    log::info!("Wrote pak file successfully (stripped: {strip})");
     let minimum_progress =
         base_progress.saturating_add(pak.total_files.max(1).min(i32::MAX as usize) as i32);
     installed_mods_ptr.fetch_max(minimum_progress, Ordering::SeqCst);
@@ -259,5 +362,49 @@ mod tests {
                 .unwrap(),
             audio_data
         );
+    }
+
+    #[test]
+    fn only_audio_banks_and_media_can_be_stripped() {
+        use super::{is_strippable_audio_entry as allowed, strip_blockers, summarize_strip_blockers};
+        let mount = "../../../";
+        assert!(allowed(mount, "Marvel/Content/WwiseAudio/bnk_sfx_1031001.bnk"));
+        assert!(allowed(mount, "Marvel/Content/WwiseAudio/Media/61/123.WEM"));
+        assert!(allowed("../../../Marvel/Content/WwiseAudio/", "English(US)/bnk_vo_1.bnk"));
+        assert!(allowed("../../../Marvel", "Content/WwiseAudio/a.bnk"));
+
+        assert!(!allowed(mount, "Marvel/Content/WwiseAudio/Engine.ini"));
+        assert!(!allowed(mount, "Marvel/Content/WwiseAudio/a.bnk.ini"));
+        assert!(!allowed(mount, "Marvel/Content/WwiseAudio/a.bnk:b.ini"));
+        assert!(!allowed(mount, "Marvel/Content/WwiseAudio/../Config/a.bnk"));
+        assert!(!allowed(mount, "../../../Marvel/Content/WwiseAudio/a.bnk"));
+        assert!(!allowed(mount, "Marvel/Config/DefaultEngine.ini"));
+        assert!(!allowed(mount, "Marvel/Content/Marvel/Characters/a.bnk"));
+        assert!(!allowed(mount, "WwiseAudio/a.bnk"));
+        assert!(!allowed(mount, "Marvel/Content/WwiseAudio/.bnk"));
+        assert!(!allowed("../../..", "../Marvel/Content/WwiseAudio/a.bnk"));
+        assert!(!allowed("", ""));
+
+        // Entries Repak drops anyway don't block stripping; everything else does.
+        let blockers = strip_blockers(
+            mount,
+            [
+                "Marvel/Content/WwiseAudio/a.bnk",
+                "patched_files",
+                "Marvel/Content/WwiseAudio/Media/desktop.ini",
+                "Marvel/Config/Engine.ini",
+                "Marvel/Content/WwiseAudio/b.txt",
+            ],
+        );
+        assert_eq!(
+            blockers,
+            vec!["Marvel/Config/Engine.ini", "Marvel/Content/WwiseAudio/b.txt"]
+        );
+        assert_eq!(
+            summarize_strip_blockers(&blockers),
+            "Marvel/Config/Engine.ini, Marvel/Content/WwiseAudio/b.txt"
+        );
+        let many = (1..=5).map(|i| format!("f{i}.ini")).collect::<Vec<_>>();
+        assert_eq!(summarize_strip_blockers(&many), "f1.ini, f2.ini, f3.ini and 2 more");
     }
 }
