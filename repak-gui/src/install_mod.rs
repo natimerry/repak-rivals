@@ -51,6 +51,9 @@ pub struct InstallableMod {
     pub enabled: bool,
     pub obfuscated: bool,
     pub encrypted: bool,
+    /// Write audio paks like stripped community mods: no full directory index, stored
+    /// uncompressed. The game resolves files through the path hash index only.
+    pub strip_audio: bool,
     // Keeps extracted archive files alive while the install dialog/worker still references them.
     #[allow(dead_code)]
     pub extracted_archive_dir: Option<Arc<TempDir>>,
@@ -62,6 +65,7 @@ impl Default for InstallableMod {
         InstallableMod {
             obfuscated: false,
             encrypted: false,
+            strip_audio: false,
             mod_name: "".to_string(),
             mod_type: "".to_string(),
             repak: false,
@@ -167,6 +171,14 @@ impl ModInstallRequest {
             kawaii_physics_usmap,
             show_terminal_progress: false,
         }
+    }
+
+    /// Pre-fills the per-mod "Strip audio mod" option from the global setting.
+    pub fn with_strip_audio_default(mut self, enabled: bool) -> Self {
+        for installable_mod in &mut self.mods {
+            installable_mod.strip_audio = enabled && installable_mod.mod_type == "Audio";
+        }
+        self
     }
 }
 
@@ -473,6 +485,32 @@ impl ModInstallRequest {
                                 );
                                 if encrypt_response.changed() && mods.encrypted && mods.iostore {
                                     mods.repak = true;
+                                }
+
+                                let strip_enabled = mods.mod_type == "Audio"
+                                    && !mods.iostore
+                                    && (mods.is_dir || mods.repak);
+                                ui.add_enabled(
+                                    strip_enabled,
+                                    Checkbox::new(&mut mods.strip_audio, "Strip audio mod"),
+                                )
+                                .on_hover_text(
+                                    "Write the .pak without a file list and without compression. \
+                                     The game still loads it, but other tools can no longer list \
+                                     its contents.",
+                                );
+                                let unnamed = mods
+                                    .reader
+                                    .as_ref()
+                                    .map_or(0, |reader| reader.unresolved_path_hashes().len());
+                                if unnamed > 0 {
+                                    ui.colored_label(
+                                        egui::Color32::YELLOW,
+                                        format!(
+                                            "{unnamed} stripped entries could not be named from \
+                                             the game files; this pak will be installed as-is."
+                                        ),
+                                    );
                                 }
 
                                 let text_edit = TextEdit::singleline(&mut mods.mount_point);

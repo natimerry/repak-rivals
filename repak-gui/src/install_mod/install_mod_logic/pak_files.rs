@@ -171,8 +171,12 @@ pub fn repak_dir(
 
     paths.sort();
 
+    // Stripped audio paks match community "stripped" mods: no full directory index and
+    // entries stored uncompressed; the game finds files through the path hash index.
+    let strip = pak.strip_audio && pak.mod_type == "Audio";
     let builder = repak::PakBuilder::new()
-        .compression(vec![pak.compression])
+        .compression(if strip { vec![] } else { vec![pak.compression] })
+        .full_directory_index(!strip)
         .key(AES_KEY.clone().0);
 
     let mut pak_writer = builder.writer(
@@ -193,7 +197,7 @@ pub fn repak_dir(
                 .expect("failed to convert to slash path");
 
             let entry = entry_builder
-                .build_entry(true, std::fs::read(p).expect("WTF"), rel)
+                .build_entry(!strip, std::fs::read(p).expect("WTF"), rel)
                 .expect("Failed to build entry");
             (rel.to_string(), entry)
         })
@@ -205,7 +209,7 @@ pub fn repak_dir(
     }
     pak_writer.write_index()?;
 
-    log::info!("Wrote pak file successfully");
+    log::info!("Wrote pak file successfully (stripped: {strip})");
     let minimum_progress =
         base_progress.saturating_add(pak.total_files.max(1).min(i32::MAX as usize) as i32);
     installed_mods_ptr.fetch_max(minimum_progress, Ordering::SeqCst);
