@@ -268,13 +268,10 @@ where
         match &mut data {
             PartialEntryData::Slice(_) => unreachable!(),
             PartialEntryData::Blocks { data, .. } => {
-                let limit = crate::data::get_limit(path);
-                let limit = if limit > data.len() {
-                    pad_zeros_to_alignment(data, 16);
-                    data.len()
-                } else {
-                    limit
-                };
+                // Encrypted payloads are stored 16-byte aligned (compressed blocks already
+                // are); only the first `limit` bytes are actually encrypted.
+                pad_zeros_to_alignment(data, 16);
+                let limit = crate::data::get_limit(path).min(data.len());
                 encrypt(key, &mut data[..limit]);
             }
         }
