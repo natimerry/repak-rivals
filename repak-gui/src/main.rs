@@ -7,6 +7,7 @@ mod install_mod;
 mod install_terminal;
 mod launch_game;
 mod main_ui;
+mod pak_names;
 mod updater;
 mod utils;
 

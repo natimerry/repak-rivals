@@ -3,7 +3,7 @@ extern crate core;
 use crate::file_table::FileTable;
 use crate::install_mod::install_mod_logic::iotoc::{to_legacy_uasset, to_legacy_uasset_fast};
 use crate::install_mod::{
-    self, map_dropped_file_to_mods, map_paths_to_mods, InstallableMod, ModInstallRequest, AES_KEY,
+    self, map_dropped_file_to_mods, map_paths_to_mods, InstallableMod, ModInstallRequest,
 };
 use crate::ios_widget;
 use crate::utils::{
@@ -32,8 +32,6 @@ use rfd::{FileDialog, MessageButtons};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::fs::File;
-use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -397,6 +395,7 @@ impl RepakModManager {
 
     fn set_game_pakchunk_path(&mut self) {
         self.game_chunk_path = find_rivals_paks_ancestor(&self.game_path);
+        crate::pak_names::set_game_paks_dir(self.game_chunk_path.clone());
     }
 
     fn repair_unsupported_companion_paks_on_startup(&self) {
@@ -726,12 +725,7 @@ impl RepakModManager {
     }
 
     fn open_pak_reader(pak_path: &Path) -> Result<PakReader, String> {
-        let mut builder = repak::PakBuilder::new();
-        builder = builder.key(AES_KEY.clone().0);
-        let file = File::open(pak_path)
-            .map_err(|e| format!("Failed to open {}: {e}", pak_path.display()))?;
-        builder
-            .reader(&mut BufReader::new(file))
+        crate::pak_names::open_pak(pak_path)
             .map_err(|e| format!("Failed to read {}: {e}", pak_path.display()))
     }
 
@@ -3417,12 +3411,8 @@ fn files_for_metadata(pak_path: &Path, is_iostore: bool) -> Result<Vec<String>, 
         return read_utoc_package_names(&pak_path.with_extension("utoc"));
     }
 
-    let mut builder = repak::PakBuilder::new();
-    builder = builder.key(AES_KEY.clone().0);
-    let file = File::open(pak_path).map_err(|e| format!("Failed to open mod: {e}"))?;
-    let pak = builder
-        .reader(&mut BufReader::new(file))
-        .map_err(|e| format!("Failed to read mod: {e}"))?;
+    let pak =
+        crate::pak_names::open_pak(pak_path).map_err(|e| format!("Failed to read mod: {e}"))?;
     Ok(pak.files())
 }
 

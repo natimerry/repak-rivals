@@ -456,6 +456,17 @@ pub fn install_mods_in_viewport(
             continue;
         }
 
+        let unnamed_entries = installable_mod
+            .reader
+            .as_ref()
+            .map_or(0, |reader| reader.unresolved_path_hashes().len());
+        if installable_mod.repak && unnamed_entries > 0 {
+            // Repacking extracts entries by name, which would silently drop the unnamed ones.
+            // The pak already loads in-game, so install it untouched instead.
+            warn!(mod_name = %installable_mod.mod_name, unnamed_entries, "Pak has entries that could not be named; installing it as-is");
+            installable_mod.repak = false;
+        }
+
         if installable_mod.repak {
             info!(mod_name = %installable_mod.mod_name, is_repak = true, "Repacking mod");
             if let Err(e) = create_repak_from_pak(

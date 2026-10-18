@@ -14,8 +14,6 @@ use repak::utils::AesKey;
 use repak::Compression::Oodle;
 use repak::{Compression, PakReader};
 use rfd::MessageButtons;
-use std::fs::File;
-use std::io::BufReader;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::Ordering::SeqCst;
@@ -566,9 +564,7 @@ fn find_mods_from_archive(
         let entry = entry.expect("Failed to read directory entry");
         let path = entry.path();
         if path.is_file() {
-            let builder = repak::PakBuilder::new()
-                .key(AES_KEY.clone().0)
-                .reader(&mut BufReader::new(File::open(path).unwrap()));
+            let builder = crate::pak_names::open_pak(path);
 
             if let Ok(builder) = builder {
                 let mut len = 1;
@@ -700,9 +696,7 @@ pub fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
                 };
                 mod_path = reader_path.clone();
 
-                let builder = repak::PakBuilder::new()
-                    .key(AES_KEY.clone().0)
-                    .reader(&mut BufReader::new(File::open(reader_path).unwrap()));
+                let builder = crate::pak_names::open_pak(&reader_path);
                 match builder {
                     Ok(builder) => {
                         pak = Some(builder.clone());
