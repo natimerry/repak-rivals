@@ -1,4 +1,11 @@
 # Changelog
+##  Version 3.10.1
+- Fix audio mods to load without Galacta or any other bypass.
+- Add audio mod stripping. On by default, toggle it in `Settings -> Strip audio mods` or per mod in the install options.
+- Add right-click `Strip audio mod` for installed audio mods that aren't stripped yet.
+- Stripped audio mods no longer show up red. Unstripped ones now tell you how to fix them.
+- Support reading stripped paks. Stripped paks whose names can't be recovered are installed as-is instead of losing files.  
+
 ## Version 3.9.3
 - Fixed a bug with kawaiiporter.
 
