@@ -78,6 +78,7 @@ pub fn fix_kawaii_physics(crypto: PackCrypto, args: FixKawaiiPhysicsArgs) -> Res
                 default_hidden_material_bitmaps: args.default_hidden_material_bitmaps.clone(),
                 game_paks_dir: Some(game_paks_dir.clone()),
                 full_iostore_check: false,
+                strip: false,
             },
         )?;
     }

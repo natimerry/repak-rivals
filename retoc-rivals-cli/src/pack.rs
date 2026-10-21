@@ -8,7 +8,7 @@ use crate::unpack::unpack_legacy_pak_to_dir;
 use crate::util::{ensure_mod_name_suffix, pak_aes_key, parse_path_hash_seed, retoc_compression};
 use retoc::{action_to_zen, ActionToZen, Config, EngineVersion};
 use std::fs::{self, File};
-use std::io::BufWriter;
+use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -88,6 +88,7 @@ pub fn pack_dir(crypto: PackCrypto, args: PackDirArgs) -> Result<(), String> {
         default_hidden_material_bitmaps: args.default_hidden_material_bitmaps,
         game_paks_dir: args.game_paks_dir,
         full_iostore_check: args.full_iostore_check,
+        strip: args.strip,
     };
     if pack_args.kawaii_physics || should_patch_default_hidden_mats(&pack_args) {
         pack_args.kawaii_physics_usmap = Some(resolve_pack_usmap(
@@ -109,7 +110,7 @@ pub fn pack_dir(crypto: PackCrypto, args: PackDirArgs) -> Result<(), String> {
         args.input.display()
     );
     let (iostore, legacy_paks, archives) = scan_directory_packages(&args.input);
-    let raw_dirs = scan_raw_mod_dirs(&args.input);
+    let raw_dirs = scan_raw_mod_dirs(&args.input, pack_args.strip);
     let raw_roots = raw_dirs
         .iter()
         .map(|path| path.as_path())
@@ -459,6 +460,32 @@ fn repack_legacy_pak(
     pak_path: &Path,
     default_output: &Path,
 ) -> Result<(), String> {
+    let file =
+        File::open(pak_path).map_err(|e| format!("Failed to open {}: {e}", pak_path.display()))?;
+    let reader = repak::PakBuilder::new()
+        .key(pak_aes_key()?.0)
+        .reader(&mut BufReader::new(file))
+        .map_err(|e| format!("Failed to read legacy pak {}: {e}", pak_path.display()))?;
+    let unnamed = reader.unresolved_path_hashes().len();
+    if unnamed > 0 {
+        // Already-stripped paks only expose path hashes, so their entries can't be extracted.
+        if !args.strip {
+            return Err(format!(
+                "{} has {unnamed} entries without names (stripped pak); it can't be repacked",
+                pak_path.display()
+            ));
+        }
+        let name = input_stem(pak_path);
+        let output_dir = output_dir_for(args, default_output, &name);
+        fs::create_dir_all(&output_dir)
+            .map_err(|e| format!("Failed to create {}: {e}", output_dir.display()))?;
+        let output = output_dir.join(format!("{}.pak", output_mod_name(args, &name)));
+        fs::copy(pak_path, &output)
+            .map_err(|e| format!("Failed to copy {}: {e}", pak_path.display()))?;
+        println!("{} is already stripped; copied to {}", pak_path.display(), output.display());
+        return Ok(());
+    }
+
     let temp = tempfile::tempdir().map_err(|e| format!("Failed to create temp dir: {e}"))?;
     unpack_legacy_pak_to_dir(pak_path, temp.path())?;
     pack_raw_dir(
@@ -485,11 +512,21 @@ fn pack_raw_dir(
     fs::create_dir_all(&output_dir)
         .map_err(|e| format!("Failed to create {}: {e}", output_dir.display()))?;
 
-    let mod_name = if args.no_mod_suffix {
-        raw_name.to_string()
-    } else {
-        ensure_mod_name_suffix(raw_name)
-    };
+    let mod_name = output_mod_name(args, raw_name);
+    if args.strip {
+        if !has_uasset(input) {
+            return write_stripped_pak(
+                input,
+                &output_dir.join(format!("{mod_name}.pak")),
+                &args.mount_point,
+                &args.path_hash_seed,
+            );
+        }
+        println!(
+            "--strip ignored for {}: it contains .uasset files, which must be packed to IoStore",
+            input.display()
+        );
+    }
     let utoc = output_dir.join(format!("{mod_name}.utoc"));
 
     let mut action = ActionToZen::new(
@@ -555,6 +592,69 @@ fn write_companion_pak(
     Ok(())
 }
 
+/// Writes every file below `input` into a stripped pak: path hash index only (no full
+/// directory index) and entries stored uncompressed, like the GUI's "Strip audio mod".
+fn write_stripped_pak(
+    input: &Path,
+    output: &Path,
+    mount_point: &str,
+    path_hash_seed: &str,
+) -> Result<(), String> {
+    let seed = parse_path_hash_seed(path_hash_seed)?;
+    let mut files = walkdir::WalkDir::new(input)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+        .map(|entry| entry.into_path())
+        .filter(|path| {
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            !matches!(name.as_str(), "desktop.ini" | "chunknames" | "patched_files")
+        })
+        .collect::<Vec<_>>();
+    files.sort();
+    if files.is_empty() {
+        return Err(format!("No files to pack in {}", input.display()));
+    }
+
+    let file =
+        File::create(output).map_err(|e| format!("Failed to create {}: {e}", output.display()))?;
+    let mut pak = repak::PakBuilder::new()
+        .key(pak_aes_key()?.0)
+        .full_directory_index(false)
+        .writer(
+            BufWriter::new(file),
+            repak::Version::V11,
+            mount_point.to_string(),
+            Some(seed),
+        );
+    for path in &files {
+        let rel = path
+            .strip_prefix(input)
+            .map_err(|_| format!("File outside input: {}", path.display()))?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let data = fs::read(path).map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
+        pak.write_file(&rel, false, data)
+            .map_err(|e| format!("Failed to write {rel}: {e}"))?;
+    }
+    pak.write_index()
+        .map_err(|e| format!("Failed to write pak index: {e}"))?;
+    println!("Wrote stripped {} ({} files)", output.display(), files.len());
+    Ok(())
+}
+
+fn output_mod_name(args: &PackArgs, name: &str) -> String {
+    if args.no_mod_suffix {
+        name.to_string()
+    } else {
+        ensure_mod_name_suffix(name)
+    }
+}
+
 fn input_stem(path: &Path) -> String {
     path.file_stem()
         .and_then(|stem| stem.to_str())
@@ -593,13 +693,16 @@ fn output_dir_for(args: &PackArgs, default_output: &Path, item_name: &str) -> Pa
     }
 }
 
-fn scan_raw_mod_dirs(root: &Path) -> Vec<PathBuf> {
+fn scan_raw_mod_dirs(root: &Path, include_loose_content: bool) -> Vec<PathBuf> {
     let mut dirs = fs::read_dir(root)
         .map(|entries| {
             entries
                 .filter_map(Result::ok)
                 .map(|entry| entry.path())
-                .filter(|path| path.is_dir() && has_uasset(path))
+                .filter(|path| {
+                    path.is_dir()
+                        && (has_uasset(path) || (include_loose_content && has_loose_content(path)))
+                })
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
@@ -618,6 +721,18 @@ fn has_uasset(dir: &Path) -> bool {
                     .extension()
                     .and_then(|ext| ext.to_str())
                     .is_some_and(|ext| ext.eq_ignore_ascii_case("uasset"))
+        })
+}
+
+/// Audio or movie files that ship loose inside plain paks (what `--strip` packs).
+fn has_loose_content(dir: &Path) -> bool {
+    walkdir::WalkDir::new(dir)
+        .into_iter()
+        .filter_map(Result::ok)
+        .any(|entry| {
+            let path = entry.path().to_string_lossy().replace('\\', "/").to_ascii_lowercase();
+            entry.file_type().is_file()
+                && (path.contains("/content/wwiseaudio/") || path.contains("/content/movies/"))
         })
 }
 

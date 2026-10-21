@@ -197,6 +197,11 @@ pub struct PackArgs {
     /// Open all game IoStore containers instead of only selected fast-path containers.
     #[arg(long)]
     pub full_iostore_check: bool,
+
+    /// Write audio/movie folders (no .uasset files) as a stripped plain .pak: no file list
+    /// and stored uncompressed. Folders with .uasset files are packed to IoStore as usual.
+    #[arg(long)]
+    pub strip: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -255,6 +260,11 @@ pub struct PackDirArgs {
     /// Open all game IoStore containers instead of only selected fast-path containers.
     #[arg(long)]
     pub full_iostore_check: bool,
+
+    /// Write audio/movie folders (no .uasset files) as a stripped plain .pak: no file list
+    /// and stored uncompressed. Folders with .uasset files are packed to IoStore as usual.
+    #[arg(long)]
+    pub strip: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]

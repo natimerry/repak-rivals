@@ -1,4 +1,9 @@
 # Changelog
+## Version 3.10.2
+- Add `--strip` to `retoc-rivals-cli pack` and `pack-dir`. Audio and movie folders are written as stripped `.pak` files, already-stripped paks are copied as-is, and folders with `.uasset` files still go to IoStore.
+- `pack-dir --strip` now picks up audio and movie folders, not just folders with `.uasset` files.
+- The CLI now errors instead of writing an empty pak when asked to repack an already-stripped pak without `--strip`.
+
 ##  Version 3.10.1
 - Fix audio mods to load without Galacta or any other bypass.
 - Add audio mod stripping. On by default, toggle it in `Settings -> Strip audio mods` or per mod in the install options.
