@@ -1,6 +1,5 @@
 use super::ensure_mod_name_suffix;
 use crate::install_mod::install_mod_logic::pak_files::repak_dir;
-use crate::install_mod::install_mod_logic::patch_meshes;
 use crate::install_mod::{InstallableMod, AES_KEY};
 use crate::utils::collect_files;
 use repak::Version;
@@ -246,10 +245,6 @@ pub fn convert_directory_to_iostore(
 
     let mut paths = vec![];
     collect_files(&mut paths, &to_pak_dir)?;
-
-    if pak.fix_mesh {
-        patch_meshes::mesh_patch(&mut paths, &to_pak_dir.to_path_buf())?;
-    }
 
     let mut action = ActionToZen::new(
         to_pak_dir.clone(),

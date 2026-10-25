@@ -10,11 +10,7 @@
     };
 
     retoc-rivals = {
-      url = "github:natimerry/retoc-rivals/00a9468510902bfb078393718e484d6c5a66a1af";
-      flake = false;
-    };
-    uasset-mesh-patch-rivals = {
-      url = "github:natimerry/uasset-mesh-patch-rivals/93f78118b661dde469f41361a2ebf004eb4f4ca2";
+      url = "github:natimerry/retoc-rivals/e6c985eac480275348976dcc6e8729c1de1bef40";
       flake = false;
     };
   };
@@ -24,7 +20,6 @@
     crane,
     fenix,
     self,
-    uasset-mesh-patch-rivals,
     retoc-rivals,
     ...
   }:
@@ -36,12 +31,12 @@
 
       packages.uasset-api = {pkgs, ...}: pkgs.buildDotnetModule rec {
         name = "UAssetAPI-Kawaii";
-        version = "95b4053";
+        version = "05c608d8cb535109a691119aec69371b70733145";
         src = pkgs.fetchFromGitHub {
           owner = "natimerry";
           repo = "UAssetAPI-Kawaii";
           rev = version;
-          hash = "sha256-tee/HD2mPiCOfpLbbbFG6lo6tGfOSVXJVr1o0fWLxQY=";
+          hash = "sha256-pld+nEhQMlF6owAhSPvTS6I0QT5vCUq9e2uX15LZwzg=";
         };
         dotnet-sdk = pkgs.dotnet-sdk_8;
         nugetDeps = ./nix/deps.json;
@@ -65,9 +60,7 @@
           cp -r ${self}/. $out/
           chmod -R u+w $out
           mkdir -p $out/retoc-rivals
-          mkdir -p $out/uasset-mesh-patch-rivals
           cp -r ${retoc-rivals}/. $out/retoc-rivals/
-          cp -r ${uasset-mesh-patch-rivals}/. $out/uasset-mesh-patch-rivals/
         '';
         # i am tired to build dependencies so i added this
         cargoArtifacts = craneLib.buildDepsOnly {

@@ -1,4 +1,3 @@
-use crate::install_mod::install_mod_logic::patch_meshes::mesh_patch;
 use crate::install_mod::{InstallableMod, AES_KEY};
 use crate::utils::collect_files;
 use log::debug;
@@ -304,10 +303,6 @@ pub fn repak_dir(
 
     let mut paths = vec![];
     collect_files(&mut paths, &to_pak_dir)?;
-
-    if pak.fix_mesh {
-        mesh_patch(&mut paths, &to_pak_dir.to_path_buf())?;
-    }
 
     paths.sort();
 

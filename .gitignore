@@ -11,7 +11,6 @@
 /repak-gui/latest.log
 /imhex_patterns/.venv/
 /imhex_patterns/*.bin
-mesh_dir_list.txt
 data/character_data.json
 /usmap/
 /sample_mods

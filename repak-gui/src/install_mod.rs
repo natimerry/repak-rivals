@@ -34,7 +34,6 @@ pub struct InstallableMod {
     pub mod_name: String,
     pub mod_type: String,
     pub repak: bool,
-    pub fix_mesh: bool,
     pub kawaii_porter: bool,
     pub default_hidden_material_patch: bool,
     pub is_dir: bool,
@@ -72,7 +71,6 @@ impl Default for InstallableMod {
             mod_name: "".to_string(),
             mod_type: "".to_string(),
             repak: false,
-            fix_mesh: false,
             kawaii_porter: true,
             default_hidden_material_patch: true,
             is_dir: false,
@@ -501,10 +499,6 @@ impl ModInstallRequest {
                                         "Patch hidden mats",
                                     ),
                                 );
-                                ui.add_enabled(
-                                    (mods.is_dir || mods.repak) && false, // new retoc should auto patch
-                                    Checkbox::new(&mut mods.fix_mesh, "Fix mesh (outdated)"),
-                                );
 
                                 ui.add_enabled(
                                     porter_enabled,
@@ -679,7 +673,6 @@ fn find_mods_from_archive(
                     mod_name: path.file_stem().unwrap().to_str().unwrap().to_string(),
                     mod_type: modtype.to_string(),
                     repak: !iostore,
-                    fix_mesh: false,
                     is_dir: false,
                     reader: Some(builder),
                     mod_path: path.to_path_buf(),
@@ -843,7 +836,6 @@ pub fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
                 mod_name: path.file_stem().unwrap().to_str().unwrap().to_string(),
                 mod_type: modtype,
                 repak: !is_dir && pak.is_some() && !iostore,
-                fix_mesh: false,
                 is_dir,
                 reader: pak,
                 mod_path,

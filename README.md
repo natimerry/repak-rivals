@@ -49,7 +49,6 @@ MarvelRivals\MarvelGame\Marvel\Content\Paks\~mods
 | `retoc-rivals/` | IoStore conversion/extraction library |
 | `repak/` | pak reader/writer library |
 | `repak_cli/` | older pak-only CLI |
-| `uasset-mesh-patch-rivals/` | mesh patch helper |
 | `usmap/` | mapping-related workspace content |
 
 ## Common Commands

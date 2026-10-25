@@ -3892,7 +3892,6 @@ dependencies = [
  "tracing-appender",
  "tracing-log",
  "tracing-subscriber",
- "uasset-mesh-patch-rivals",
  "unrar",
  "walkdir",
  "winres",
@@ -5037,13 +5036,6 @@ name = "typenum"
 version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
-
-[[package]]
-name = "uasset-mesh-patch-rivals"
-version = "0.1.0"
-dependencies = [
- "byteorder",
-]
 
 [[package]]
 name = "uds_windows"

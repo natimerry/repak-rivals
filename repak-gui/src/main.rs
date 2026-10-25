@@ -26,9 +26,7 @@ use retoc::{action_unpack, ActionUnpack, FGuid};
 use std::cell::LazyCell;
 use std::collections::HashMap;
 use std::env::args;
-use std::fs::{self, create_dir, File};
-use std::io::BufWriter;
-use std::io::Write;
+use std::fs::{self, create_dir};
 use std::path::PathBuf;
 use std::process::exit;
 use std::str::FromStr;
@@ -341,31 +339,6 @@ fn parse_markdown_to_skin_entries(markdown: &str) -> Vec<SkinEntry> {
 
     entries
 }
-#[instrument(name = "fetch_mesh_list_in_bg")]
-pub fn fetch_mesh_list_in_bg(
-) -> thread::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>> {
-    thread::spawn(|| {
-        let client = reqwest::blocking::Client::new();
-
-        let response = client
-            .get("https://rivals.natimerry.com/meshes")
-            .send()?
-            .error_for_status()?;
-
-        let body = response.text()?;
-        let json: Vec<String> = serde_json::from_str(&body)?;
-
-        let file = File::create("mesh_dir_list.txt")?;
-        let mut writer = BufWriter::new(file);
-
-        for line in json {
-            writeln!(writer, "{}", line)?;
-        }
-
-        Ok(())
-    })
-}
-
 #[derive(serde::Deserialize)]
 struct CliState {
     game_path: PathBuf,
@@ -707,7 +680,6 @@ fn main() {
     fetch_skins_in_background();
 
     #[cfg(not(debug_assertions))]
-    fetch_mesh_list_in_bg();
     eframe::run_native(
         "Repak GUI",
         options,

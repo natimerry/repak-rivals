@@ -1,7 +1,6 @@
 pub mod archives;
 pub mod iotoc;
 pub mod pak_files;
-pub mod patch_meshes;
 
 use crate::install_mod::InstallableMod;
 use iotoc::{convert_directory_to_iostore, to_legacy_uasset_fast_with_progress};
@@ -170,7 +169,6 @@ fn repack_iostore_via_fast_extract(
     default_hidden_material_bitmaps: Option<&[u64]>,
 ) -> Result<(), repak::Error> {
     if !kawaii_porter && !patch_default_hidden_materials && default_hidden_material_bitmaps.is_none()
-        && !installable_mod.fix_mesh
     {
         if iotoc::repack_iostore_direct(installable_mod, output_mod_dir, installed_mods_ptr.clone())? {
             return Ok(());
