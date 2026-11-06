@@ -68,11 +68,14 @@ disabled because UAssetAPI relies on reflection.
 The Rust side embeds the published DLL artifacts, extracts them beside the
 running binary under `KawaiiPhysicsBinding/`, loads .NET through `hostfxr`, and
 calls the managed `PortAsset` export directly. This avoids spawning a helper
-process for every asset.
+process for every asset. If the executable directory is read-only (for example
+a Nix store path), the binding is extracted to
+`$XDG_CACHE_HOME/retoc-rivals/` or `~/.cache/retoc-rivals/` instead.
 
 By default the binding is framework-dependent and requires a local .NET
 runtime. The runtime config allows major-version roll-forward, so newer .NET
-runtimes can satisfy the binding.
+runtimes can satisfy the binding. The Nix package sets `DOTNET_ROOT` to a
+bundled .NET 8 runtime.
 
 Set `RETOC_KAWAII_BINDING_SELF_CONTAINED=true` when building release artifacts
 if the binding should publish as a self-contained helper process. This variant
