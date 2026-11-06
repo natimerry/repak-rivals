@@ -9,11 +9,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     uasset-api = {
-      url = "path:/home/anisp/stuff/UAssetAPI-Kawaii";
+      url = "github:natimerry/UAssetAPI-kawaii";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     retoc-rivals = {
-      url = "path:/home/anisp/stuff/repak-rivals/retoc-rivals";
+      url = "github:natimerry/retoc-rivals";
       flake = false;
     };
   };
