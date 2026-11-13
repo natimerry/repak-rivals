@@ -55,6 +55,13 @@ Repairing extracts each mod and repacks it without encryption, so it passes the 
 
 Modders: please re-upload your encrypted mods without encryption.";
 const DECRYPTION_REQUIRED_ROW_MESSAGE: &str = "This mod is encrypted. It fails the game's Season 11 anti-cheat check and gets reported. Right-click it and choose \"Decrypt mod\" to repair it.";
+const STRIPPED_PAK_MESSAGE: &str = "Since Season 11, the game's anti-cheat checks every mod in your mods folder. \
+Stripped mods (packed without a file list) can't be read by the check, the same as encrypted mods, and get reported. \
+No action is being taken against them yet, but to avoid any risk of bans you should not keep stripped mods installed.\n\n\
+Repairing rebuilds each mod's file list from the game files, so it passes the check and loads normally. \
+Your originals are backed up when \"Make backups\" is on.";
+const STRIPPED_PAK_ROW_MESSAGE: &str = "This mod is stripped (no file list). It fails the game's Season 11 anti-cheat check. \
+Right-click it and choose \"Restore file list\" to repair it.";
 const LEGACY_PAK_MESSAGE: &str = "Wait for bypass xo";
 // use eframe::egui::WidgetText::RichText;
 
@@ -138,6 +145,12 @@ pub struct RepakModManager {
     encryption_prompt_evaluated: bool,
     #[serde(skip)]
     encryption_worker: Option<thread::JoinHandle<Result<(), String>>>,
+    #[serde(skip)]
+    unstrip_state: UnstripUiState,
+    #[serde(skip)]
+    unstrip_prompt_evaluated: bool,
+    #[serde(skip)]
+    unstrip_worker: Option<thread::JoinHandle<Result<(), String>>>,
 
     #[serde(skip)]
     welcome_screen: Option<ShowWelcome>,
@@ -303,6 +316,18 @@ enum EncryptionUiState {
     Hidden,
     Available(Vec<PathBuf>),
     Encrypting(Vec<PathBuf>),
+    Failed {
+        mods: Vec<PathBuf>,
+        error: String,
+    },
+}
+
+#[derive(Clone, Default)]
+enum UnstripUiState {
+    #[default]
+    Hidden,
+    Available(Vec<PathBuf>),
+    Running(Vec<PathBuf>),
     Failed {
         mods: Vec<PathBuf>,
         error: String,
@@ -1043,6 +1068,8 @@ impl RepakModManager {
                         let is_audio = self.pak_files[i].category == "Audio";
                         let failure_message = if is_iostore && self.pak_files[i].encrypted {
                             Some(DECRYPTION_REQUIRED_ROW_MESSAGE)
+                        } else if !is_iostore && self.pak_files[i].stripped {
+                            Some(STRIPPED_PAK_ROW_MESSAGE)
                         } else if !is_iostore && !is_audio {
                             Some(LEGACY_PAK_MESSAGE)
                         } else {
@@ -1252,6 +1279,29 @@ let row_stroke = Stroke::new(
             if response.clicked() {
                 ui.close_menu();
                 self.start_encrypt_mods(vec![pak_path.to_path_buf()]);
+            }
+            ui.separator();
+        }
+        let stripped = self.pak_files.get(i).is_some_and(|entry| {
+            !entry.is_iostore && !entry.metadata_pending && entry.stripped
+        });
+        if stripped {
+            let unstrip_running = self
+                .unstrip_worker
+                .as_ref()
+                .is_some_and(|worker| !worker.is_finished());
+            let response = ui.add_enabled(
+                self.game_chunk_path.is_some() && !unstrip_running,
+                Button::new("Restore file list"),
+            );
+            if self.game_chunk_path.is_none() {
+                response.clone().on_disabled_hover_text(
+                    "The Marvel Rivals game Paks directory is required to rebuild the file list.",
+                );
+            }
+            if response.clicked() {
+                ui.close_menu();
+                self.start_unstrip_mods(vec![pak_path.to_path_buf()]);
             }
             ui.separator();
         }
@@ -2425,6 +2475,231 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
             None => {}
         }
     }
+    fn start_unstrip_mods(&mut self, paths: Vec<PathBuf>) {
+        if paths.is_empty()
+            || self
+                .unstrip_worker
+                .as_ref()
+                .is_some_and(|worker| !worker.is_finished())
+        {
+            return;
+        }
+        if self.game_chunk_path.is_none() {
+            self.unstrip_state = UnstripUiState::Failed {
+                mods: paths,
+                error: "The Marvel Rivals game Paks directory could not be found.".to_string(),
+            };
+            return;
+        }
+        info!(mod_count = paths.len(), "Restoring file lists of stripped mods");
+        self.unstrip_state = UnstripUiState::Running(paths.clone());
+        self.unstrip_prompt_evaluated = true;
+        let backup = self.make_backups;
+        self.unstrip_worker = Some(thread::spawn(move || {
+            for path in paths {
+                crate::install_mod::install_mod_logic::pak_files::unstrip_installed_pak(
+                    &path, backup,
+                )
+                .map_err(|error| {
+                    format!(
+                        "Failed to restore the file list of {}: {error}",
+                        path.file_stem()
+                            .and_then(|stem| stem.to_str())
+                            .unwrap_or("mod")
+                    )
+                })?;
+            }
+            Ok(())
+        }));
+    }
+
+    fn process_unstrip_worker(&mut self, ctx: &egui::Context) {
+        let Some(worker) = self.unstrip_worker.as_ref() else {
+            return;
+        };
+        if !worker.is_finished() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            return;
+        }
+        let Some(worker) = self.unstrip_worker.take() else {
+            return;
+        };
+        let attempted = match &self.unstrip_state {
+            UnstripUiState::Running(mods) => mods.clone(),
+            _ => Vec::new(),
+        };
+        self.unstrip_state = match worker.join() {
+            Ok(Ok(())) => {
+                info!(mod_count = attempted.len(), "Restored file lists of stripped mods");
+                UnstripUiState::Hidden
+            }
+            Ok(Err(error)) => {
+                error!(error = %error, "Failed to restore stripped mods");
+                UnstripUiState::Failed {
+                    mods: attempted,
+                    error,
+                }
+            }
+            Err(_) => UnstripUiState::Failed {
+                mods: attempted,
+                error: "The file list restore worker panicked.".to_string(),
+            },
+        };
+        self.collect_pak_files();
+        ctx.request_repaint();
+    }
+
+    fn maybe_show_unstrip_prompt(&mut self) {
+        // Wait for the encryption prompt so the two never stack on top of each other.
+        if self.unstrip_prompt_evaluated
+            || self.metadata_receiver.is_some()
+            || !matches!(self.update_state, UpdateUiState::Idle)
+            || !matches!(self.encryption_state, EncryptionUiState::Hidden)
+            || self.encryption_worker.is_some()
+        {
+            return;
+        }
+        self.unstrip_prompt_evaluated = true;
+        let affected = self
+            .pak_files
+            .iter()
+            .filter(|entry| !entry.is_iostore && !entry.metadata_pending && entry.stripped)
+            .map(|entry| entry.path.clone())
+            .collect::<Vec<_>>();
+        if !affected.is_empty() {
+            self.unstrip_state = UnstripUiState::Available(affected);
+        }
+    }
+
+    fn show_unstrip_window(&mut self, ctx: &egui::Context) {
+        if !matches!(self.update_state, UpdateUiState::Idle) {
+            return;
+        }
+        enum UnstripAction {
+            Start(Vec<PathBuf>),
+            Dismiss,
+        }
+        let snapshot = self.unstrip_state.clone();
+        let mut action = None;
+        match snapshot {
+            UnstripUiState::Hidden => return,
+            UnstripUiState::Available(mods) => {
+                let window_size = update_window_size(ctx);
+                egui::Window::new("Stripped mods found")
+                    .collapsible(false)
+                    .resizable(false)
+                    .fixed_size(window_size)
+                    .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    .frame(update_window_frame(ctx))
+                    .show(ctx, |ui| {
+                        let (left_width, right_width, scroll_height) = update_window_layout(ui);
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.set_width(left_width);
+                                ui.heading("Stripped mods detected");
+                                ui.add_space(8.0);
+                                ui.add(Label::new(STRIPPED_PAK_MESSAGE).wrap());
+                                ui.add_space(12.0);
+                                if ui
+                                    .add_sized(
+                                        [left_width, 30.0],
+                                        Button::new(
+                                            RichText::new("Repair all (restore file lists)")
+                                                .color(Color32::WHITE),
+                                        )
+                                        .fill(self.theme_accent()),
+                                    )
+                                    .clicked()
+                                {
+                                    action = Some(UnstripAction::Start(mods.clone()));
+                                }
+                                if ui
+                                    .add_sized([left_width, 28.0], Button::new("Not now"))
+                                    .clicked()
+                                {
+                                    action = Some(UnstripAction::Dismiss);
+                                }
+                            });
+                            ui.separator();
+                            ui.vertical(|ui| {
+                                ui.set_width(right_width);
+                                ui.heading("Affected mods");
+                                ui.add_space(8.0);
+                                ScrollArea::vertical()
+                                    .id_salt("unstrip_candidates")
+                                    .max_height(scroll_height)
+                                    .show(ui, |ui| {
+                                        for path in &mods {
+                                            ui.horizontal(|ui| {
+                                                ui.add(
+                                                    Label::new(
+                                                        path.file_stem()
+                                                            .and_then(|stem| stem.to_str())
+                                                            .unwrap_or("Unknown mod"),
+                                                    )
+                                                    .truncate(),
+                                                );
+                                                ui.with_layout(
+                                                    egui::Layout::right_to_left(Align::Center),
+                                                    |ui| {
+                                                        if ui.button("Repair").clicked() {
+                                                            action = Some(UnstripAction::Start(
+                                                                vec![path.clone()],
+                                                            ));
+                                                        }
+                                                    },
+                                                );
+                                            });
+                                            ui.separator();
+                                        }
+                                    });
+                            });
+                        });
+                    });
+            }
+            UnstripUiState::Running(mods) => {
+                egui::Window::new("Restoring file lists")
+                    .collapsible(false)
+                    .resizable(false)
+                    .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    .frame(update_window_frame(ctx))
+                    .show(ctx, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(format!("Rebuilding file lists for {} mod(s)...", mods.len()));
+                        });
+                    });
+            }
+            UnstripUiState::Failed { mods, error } => {
+                egui::Window::new("Restoring file lists failed")
+                    .collapsible(false)
+                    .resizable(false)
+                    .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    .frame(update_window_frame(ctx))
+                    .show(ctx, |ui| {
+                        ui.add(
+                            Label::new(RichText::new(&error).color(Color32::from_rgb(255, 145, 160)))
+                                .wrap(),
+                        );
+                        ui.add_space(12.0);
+                        ui.horizontal(|ui| {
+                            if !mods.is_empty() && ui.button("Try again").clicked() {
+                                action = Some(UnstripAction::Start(mods.clone()));
+                            }
+                            if ui.button("Close").clicked() {
+                                action = Some(UnstripAction::Dismiss);
+                            }
+                        });
+                    });
+            }
+        }
+        match action {
+            Some(UnstripAction::Start(mods)) => self.start_unstrip_mods(mods),
+            Some(UnstripAction::Dismiss) => self.unstrip_state = UnstripUiState::Hidden,
+            None => {}
+        }
+    }
+
     fn theme_accent(&self) -> Color32 {
         if self.pink_theme {
             PINK
@@ -3025,6 +3300,18 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
                     self.show_encryption_window(ui.ctx());
                 }
 
+                if ui.button("Stripped Mod Check").clicked() {
+                    self.unstrip_prompt_evaluated = false;
+                    self.maybe_show_unstrip_prompt();
+                    if !matches!(self.unstrip_state, UnstripUiState::Available(_)) {
+                        rfd::MessageDialog::new()
+                            .set_buttons(MessageButtons::Ok)
+                            .set_title("Nothing to do")
+                            .set_description("No stripped mods found. You're good to go.")
+                            .show();
+                    }
+                }
+
                 if ui.button("Quit").clicked() {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 }
@@ -3272,6 +3559,7 @@ impl eframe::App for RepakModManager {
         self.show_update_window(ctx);
         self.process_fix_kawaii_worker(ctx);
         self.process_encryption_worker(ctx);
+        self.process_unstrip_worker(ctx);
         self.process_kawaii_runtime_messages(ctx);
         self.show_kawaii_runtime_window(ctx);
         self.show_default_hidden_material_bitmap_creator(ctx);
@@ -3284,6 +3572,8 @@ impl eframe::App for RepakModManager {
         self.process_metadata_messages(ctx);
         self.maybe_show_encryption_prompt();
         self.show_encryption_window(ctx);
+        self.maybe_show_unstrip_prompt();
+        self.show_unstrip_window(ctx);
 
         let mut collect_pak = false;
 

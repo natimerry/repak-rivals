@@ -131,6 +131,64 @@ pub fn rewrite_unsupported_companion_pak(path: &Path) -> Result<bool, repak::Err
     Ok(true)
 }
 
+/// Rebuilds the full directory index of an installed stripped pak. Entry names are recovered
+/// from the path hash index using the game's own file list (the same lookup the UI uses to
+/// display stripped paks), then the pak is rewritten with a normal file list and compression.
+pub fn unstrip_installed_pak(path: &Path, make_backup: bool) -> Result<(), repak::Error> {
+    let reader = crate::pak_names::open_pak(path)?;
+    if reader.has_full_directory_index() {
+        return Ok(());
+    }
+    let unnamed = reader.unresolved_path_hashes().len();
+    if unnamed > 0 {
+        return Err(repak::Error::Io(std::io::Error::other(format!(
+            "{unnamed} entries could not be named from the game files, so the file list can't be rebuilt"
+        ))));
+    }
+
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut replacement = tempfile::NamedTempFile::new_in(parent).map_err(repak::Error::Io)?;
+    let mut writer = repak::PakBuilder::new()
+        .key(AES_KEY.clone().0)
+        .compression(vec![repak::Compression::Oodle])
+        .full_directory_index(true)
+        .writer(
+            BufWriter::new(replacement.as_file_mut()),
+            reader.version(),
+            reader.mount_point().to_string(),
+            reader.path_hash_seed(),
+        );
+    let mut source = BufReader::new(File::open(path)?);
+    for entry in reader.files() {
+        if crate::install_mod::is_unsupported_companion_entry(reader.mount_point(), &entry) {
+            continue;
+        }
+        let data = reader.get(&entry, &mut source)?;
+        writer.write_file(&entry, true, data)?;
+    }
+    writer.write_index()?.flush()?;
+    drop(source);
+    replacement.as_file().sync_all()?;
+
+    if make_backup {
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("mod.pak");
+        let mut backup = path.with_file_name(format!("{file_name}.rebak"));
+        let mut suffix = 1usize;
+        while backup.exists() {
+            backup = path.with_file_name(format!("{file_name}.{suffix}.rebak"));
+            suffix += 1;
+        }
+        fs::copy(path, &backup)?;
+    }
+    replacement
+        .persist(path)
+        .map_err(|error| repak::Error::Io(error.error))?;
+    Ok(())
+}
+
 pub fn extract_pak_to_dir(pak: &InstallableMod, install_dir: PathBuf) -> Result<(), repak::Error> {
     let pak_reader = pak.clone().reader.clone().unwrap();
 
