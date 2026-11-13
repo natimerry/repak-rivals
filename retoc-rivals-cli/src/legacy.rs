@@ -16,6 +16,8 @@ pub fn fix_kawaii_physics(crypto: PackCrypto, args: FixKawaiiPhysicsArgs) -> Res
         return fix_kawaii_physics_directory(
             input,
             args.usmap.as_deref(),
+            !args.keep_existing_chains,
+            args.kawaii_options_json.as_deref(),
             args.patch_default_hidden_mats,
             default_hidden_material_bitmaps(&args),
         );
@@ -74,6 +76,8 @@ pub fn fix_kawaii_physics(crypto: PackCrypto, args: FixKawaiiPhysicsArgs) -> Res
                 compression: crate::cli::CompressionArg::Oodle,
                 kawaii_physics: true,
                 kawaii_physics_usmap: Some(usmap.clone()),
+                keep_existing_chains: args.keep_existing_chains,
+                kawaii_options_json: args.kawaii_options_json.clone(),
                 patch_default_hidden_mats: args.patch_default_hidden_mats,
                 default_hidden_material_bitmaps: args.default_hidden_material_bitmaps.clone(),
                 game_paks_dir: Some(game_paks_dir.clone()),
@@ -90,6 +94,8 @@ pub fn fix_kawaii_physics(crypto: PackCrypto, args: FixKawaiiPhysicsArgs) -> Res
 fn fix_kawaii_physics_directory(
     input: &Path,
     usmap_arg: Option<&Path>,
+    force_chain_rebuild: bool,
+    options_json: Option<&str>,
     patch_default_hidden_mats: bool,
     default_hidden_material_bitmaps: Option<&[u64]>,
 ) -> Result<(), String> {
@@ -111,10 +117,10 @@ fn fix_kawaii_physics_directory(
     let ported = retoc::port_kawaii_physics_directory(
         input,
         &usmap,
-        true,
+        force_chain_rebuild,
         patch_default_hidden_mats,
         default_hidden_material_bitmaps,
-        None,
+        options_json,
     )
     .map_err(|e| format!("KawaiiPhysics directory fix failed: {e:#}"))?;
     println!("Ported {ported} KawaiiPhysics anim nodes");

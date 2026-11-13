@@ -182,6 +182,14 @@ pub struct PackArgs {
     #[arg(long)]
     pub kawaii_physics_usmap: Option<PathBuf>,
 
+    /// Keep existing KawaiiPhysics Chains[0] untouched. By default they are rebuilt.
+    #[arg(long)]
+    pub keep_existing_chains: bool,
+
+    /// JSON object of advanced KawaiiPhysics overrides.
+    #[arg(long)]
+    pub kawaii_options_json: Option<String>,
+
     /// Patch LODInfo.DefaultHiddenMaterials from carrier data.
     #[arg(long)]
     pub patch_default_hidden_mats: bool,
@@ -244,6 +252,14 @@ pub struct PackDirArgs {
     /// USMAP used by KawaiiPhysics porting. If omitted, saved config is used, then the latest mapping is downloaded.
     #[arg(long)]
     pub kawaii_physics_usmap: Option<PathBuf>,
+
+    /// Keep existing KawaiiPhysics Chains[0] untouched. By default they are rebuilt.
+    #[arg(long)]
+    pub keep_existing_chains: bool,
+
+    /// JSON object of advanced KawaiiPhysics overrides.
+    #[arg(long)]
+    pub kawaii_options_json: Option<String>,
 
     /// Patch LODInfo.DefaultHiddenMaterials from carrier data.
     #[arg(long)]
@@ -309,6 +325,14 @@ pub struct FixKawaiiPhysicsArgs {
     #[arg(short, long)]
     pub usmap: Option<PathBuf>,
 
+    /// Keep existing KawaiiPhysics Chains[0] untouched. By default they are rebuilt.
+    #[arg(long)]
+    pub keep_existing_chains: bool,
+
+    /// JSON object of advanced KawaiiPhysics overrides.
+    #[arg(long)]
+    pub kawaii_options_json: Option<String>,
+
     /// Patch LODInfo.DefaultHiddenMaterials from carrier data.
     #[arg(long)]
     pub patch_default_hidden_mats: bool,
@@ -348,6 +372,36 @@ mod tests {
         let args = Args::try_parse_from(["retoc-rivals-cli", "info", "mod.pak"]).unwrap();
         assert!(args.aes_key.is_none());
         assert!(args.guid.is_none());
+    }
+
+    #[test]
+    fn chain_rebuild_is_default() {
+        let args =
+            Args::try_parse_from(["retoc-rivals-cli", "pack", "mod.zip", "--kawaii-physics"])
+                .unwrap();
+        let Command::Pack(pack) = args.command else {
+            panic!("expected pack");
+        };
+        assert!(!pack.keep_existing_chains);
+        assert!(pack.kawaii_options_json.is_none());
+
+        let args = Args::try_parse_from([
+            "retoc-rivals-cli",
+            "fix-kawaii-physics",
+            "raw-assets",
+            "--keep-existing-chains",
+            "--kawaii-options-json",
+            r#"{"damping":0.25}"#,
+        ])
+        .unwrap();
+        let Command::FixKawaiiPhysics(fix) = args.command else {
+            panic!("expected fix-kawaii-physics");
+        };
+        assert!(fix.keep_existing_chains);
+        assert_eq!(
+            fix.kawaii_options_json.as_deref(),
+            Some(r#"{"damping":0.25}"#)
+        );
     }
 
     #[test]

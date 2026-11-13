@@ -84,6 +84,8 @@ pub fn pack_dir(crypto: PackCrypto, args: PackDirArgs) -> Result<(), String> {
         compression: args.compression,
         kawaii_physics: args.kawaii_physics,
         kawaii_physics_usmap: args.kawaii_physics_usmap,
+        keep_existing_chains: args.keep_existing_chains,
+        kawaii_options_json: args.kawaii_options_json,
         patch_default_hidden_mats: args.patch_default_hidden_mats,
         default_hidden_material_bitmaps: args.default_hidden_material_bitmaps,
         game_paks_dir: args.game_paks_dir,
@@ -537,7 +539,10 @@ fn pack_raw_dir(
     )
     .with_obfuscation(args.obfuscate);
     if let Some(usmap) = args.kawaii_physics_usmap.clone() {
-        action = action.with_kawaii_physics_port(usmap);
+        action = action
+            .with_kawaii_physics_port(usmap)
+            .with_kawaii_physics_force_rebuild(!args.keep_existing_chains)
+            .with_kawaii_physics_edit_options_json(args.kawaii_options_json.clone());
     }
     if args.patch_default_hidden_mats {
         action = action.with_default_hidden_material_patch();
@@ -559,7 +564,7 @@ fn pack_raw_dir(
     };
     config.port_kawaii_physics = args.kawaii_physics;
     config.kawaii_physics_usmap = args.kawaii_physics_usmap.clone();
-    config.kawaii_physics_force_rebuild = true;
+    config.kawaii_physics_force_rebuild = !args.keep_existing_chains;
     config.patch_default_hidden_materials = args.patch_default_hidden_mats;
     config.kawaii_physics_default_hidden_material_bitmaps = default_hidden_material_bitmaps(args);
     action_to_zen(action, Arc::new(config)).map_err(|e| format!("Pack failed: {e:#}"))?;
