@@ -679,14 +679,16 @@ fn main() {
     // spawn a background thread to get skins
     fetch_skins_in_background();
 
-    #[cfg(not(debug_assertions))]
     eframe::run_native(
         "Repak GUI",
         options,
         Box::new(|cc| {
             setup_custom_style(&cc.egui_ctx,false);
             Ok(Box::new(
-                RepakModManager::load(cc, path_reset).unwrap_or(RepakModManager::default()),
+                RepakModManager::load(cc, path_reset).unwrap_or_else(|e| {
+                    tracing::error!("Failed to load config, using defaults: {e}");
+                    RepakModManager::default()
+                }),
             ))
         }),
     )

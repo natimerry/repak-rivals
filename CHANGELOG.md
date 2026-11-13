@@ -1,4 +1,15 @@
 # Changelog
+## Version 3.11.0
+- **Season 11:** the game's anti-cheat now checks every mod and reports encrypted/obfuscated and stripped mods. No bans yet, but don't keep them installed.
+- Add a prompt to repair encrypted mods. They are extracted and repacked without encryption, and the originals are backed up when `Make backups` is on. Also in `File -> Decryption Check` and the right-click menu (`Decrypt mod`).
+- Add a separate prompt to repair stripped mods. The file list is rebuilt from the game files and the pak is rewritten normally. Also in `File -> Stripped Mod Check` and the right-click menu (`Restore file list`).
+- Obfuscate, Encrypt and Strip audio mod options are now greyed out, and the `Strip audio mods` setting is disabled.
+- Revert the 3.9.3 KawaiiPhysics chain change. Legacy nodes are converted like 3.9.2 again.
+- Add advanced KawaiiPhysics options (damping, stiffness, gravity, warm-up, ...) to the install dialog. Existing chains are rebuilt by default; untick `Rebuild existing chains` to keep them.
+- CLI: add `--keep-existing-chains` and `--kawaii-options-json`.
+- Add `Settings -> Check for updates on launch`.
+- Prompt windows now follow the pink theme.
+
 ## Version 3.10.2
 - Add `--strip` to `retoc-rivals-cli pack` and `pack-dir`. Audio and movie folders are written as stripped `.pak` files, already-stripped paks are copied as-is, and folders with `.uasset` files still go to IoStore.
 - `pack-dir --strip` now picks up audio and movie folders, not just folders with `.uasset` files.
