@@ -2452,7 +2452,7 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
                     .show(ctx, |ui| {
                         ui.add(
                             Label::new(
-                                RichText::new(&error).color(Color32::from_rgb(255, 145, 160)),
+                                RichText::new(&error).color(prompt_error_color(ctx)),
                             )
                             .wrap(),
                         );
@@ -2678,7 +2678,7 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
                     .frame(update_window_frame(ctx))
                     .show(ctx, |ui| {
                         ui.add(
-                            Label::new(RichText::new(&error).color(Color32::from_rgb(255, 145, 160)))
+                            Label::new(RichText::new(&error).color(prompt_error_color(ctx)))
                                 .wrap(),
                         );
                         ui.add_space(12.0);
@@ -3015,7 +3015,7 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
                                 ui.add(
                                     Label::new(
                                         RichText::new(&error)
-                                            .color(Color32::from_rgb(255, 145, 160)),
+                                            .color(prompt_error_color(ctx)),
                                     )
                                     .wrap(),
                                 );
@@ -3697,13 +3697,37 @@ fn update_window_size(ctx: &egui::Context) -> egui::Vec2 {
     )
 }
 
+/// The pink theme uses light visuals; prompts follow whichever theme is active.
+fn is_pink_theme(ctx: &egui::Context) -> bool {
+    !ctx.style().visuals.dark_mode
+}
+
+/// Error text color that stays readable on both the dark and pink prompt backgrounds.
+fn prompt_error_color(ctx: &egui::Context) -> Color32 {
+    if is_pink_theme(ctx) {
+        Color32::from_rgb(190, 20, 60)
+    } else {
+        Color32::from_rgb(255, 145, 160)
+    }
+}
+
 fn update_window_frame(ctx: &egui::Context) -> egui::Frame {
+    if is_pink_theme(ctx) {
+        return egui::Frame::window(&ctx.style())
+            .fill(Color32::from_rgb(255, 240, 247))
+            .stroke(Stroke::new(1.0_f32, PINK));
+    }
     egui::Frame::window(&ctx.style())
         .fill(Color32::from_rgb(24, 24, 28))
         .stroke(Stroke::new(1.0_f32, Color32::from_rgb(82, 34, 44)))
 }
 
 fn kawaii_runtime_window_frame(ctx: &egui::Context) -> egui::Frame {
+    if is_pink_theme(ctx) {
+        return egui::Frame::window(&ctx.style())
+            .fill(Color32::from_rgb(255, 232, 242))
+            .stroke(Stroke::new(1.0_f32, PINK));
+    }
     egui::Frame::window(&ctx.style())
         .fill(Color32::from_rgba_unmultiplied(28, 28, 32, 255))
         .stroke(Stroke::new(1.0_f32, Color32::from_rgb(124, 44, 58)))
