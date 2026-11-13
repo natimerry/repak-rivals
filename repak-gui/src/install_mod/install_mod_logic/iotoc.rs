@@ -277,7 +277,10 @@ pub fn convert_directory_to_iostore(
             usmap = %usmap.display(),
             "Passing USMAP to KawaiiPhysics porter"
         );
-        action = action.with_kawaii_physics_port(usmap);
+        action = action
+            .with_kawaii_physics_port(usmap)
+            .with_kawaii_physics_force_rebuild(pak.kawaii_options.force_chain_rebuild)
+            .with_kawaii_physics_edit_options_json(pak.kawaii_options.edit_options_json());
     }
     if patch_default_hidden_materials {
         action = action.with_default_hidden_material_patch();
@@ -290,7 +293,7 @@ pub fn convert_directory_to_iostore(
         container_header_version_override: None,
         port_kawaii_physics: kawaii_porter,
         kawaii_physics_usmap: kawaii_physics_usmap,
-        kawaii_physics_force_rebuild: true,
+        kawaii_physics_force_rebuild: pak.kawaii_options.force_chain_rebuild,
         patch_default_hidden_materials,
         kawaii_physics_default_hidden_material_bitmaps: default_hidden_material_bitmaps
             .map(|bitmaps| bitmaps.to_vec()),

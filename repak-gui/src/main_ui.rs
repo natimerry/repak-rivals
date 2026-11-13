@@ -4,7 +4,8 @@ use crate::file_table::FileTable;
 use crate::install_mod::install_mod_logic::iotoc::{to_legacy_uasset, to_legacy_uasset_fast};
 use crate::install_mod::install_mod_logic::pak_files::strip_installed_pak;
 use crate::install_mod::{
-    self, map_dropped_file_to_mods, map_paths_to_mods, InstallableMod, ModInstallRequest,
+    self, map_dropped_file_to_mods, map_paths_to_mods, render_kawaii_advanced_options,
+    InstallableMod, KawaiiPhysicsAdvancedOptions, ModInstallRequest,
 };
 use crate::ios_widget;
 use crate::utils::{
@@ -159,6 +160,8 @@ pub struct RepakModManager {
     default_hidden_material_creator_lods: Vec<u64>,
     #[serde(skip)]
     default_hidden_material_creator_slots: usize,
+    #[serde(skip)]
+    kawaii_advanced_options: KawaiiPhysicsAdvancedOptions,
     version: Option<String>,
 
     game_chunk_path: Option<PathBuf>,
@@ -1417,6 +1420,11 @@ let row_stroke = Stroke::new(
                 });
             }
 
+            ui.collapsing("Advanced KawaiiPhysics", |ui| {
+                render_kawaii_advanced_options(ui, &mut self.kawaii_advanced_options);
+            });
+
+            let kawaii_advanced_options = self.kawaii_advanced_options.clone();
             let build_installed_iostore_mod = |kawaii_porter, default_hidden_material_patch| {
                 let mod_name = pak_path
                     .file_stem()
@@ -1428,6 +1436,9 @@ let row_stroke = Stroke::new(
                     mod_type: "".to_string(),
                     repak: false,
                     kawaii_porter,
+                    kawaii_options: kawaii_advanced_options.clone(),
+                    options_expanded: false,
+                    kawaii_advanced_expanded: false,
                     default_hidden_material_patch,
                     is_dir: false,
                     reader: None,
@@ -2171,6 +2182,9 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
             mod_type: entry.characteristic.clone(),
             repak: false,
             kawaii_porter: false,
+            kawaii_options: KawaiiPhysicsAdvancedOptions::default(),
+            options_expanded: false,
+            kawaii_advanced_expanded: false,
             default_hidden_material_patch: false,
             is_dir: false,
             editing: false,

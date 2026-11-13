@@ -24,6 +24,355 @@ use tempfile::{tempdir, TempDir};
 use tracing::{debug, error, info, instrument, warn};
 use walkdir::WalkDir;
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KawaiiPhysicsAdvancedOptions {
+    #[serde(skip)]
+    pub force_chain_rebuild: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub use_curves: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub damping: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stiffness: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gravity_scale: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub world_damping_location: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub world_damping_rotation: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub teleport_distance_threshold: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub teleport_rotation_threshold: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_warm_up: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warm_up_frames: Option<i32>,
+    #[serde(skip_serializing_if = "is_false")]
+    pub clear_curve_data: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub clear_external_forces: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub disable_wind: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub use_world_space_gravity: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub use_project_gravity: Option<bool>,
+}
+
+impl Default for KawaiiPhysicsAdvancedOptions {
+    /// Existing chains are rebuilt by default, matching 3.9.2 behaviour.
+    fn default() -> Self {
+        Self {
+            force_chain_rebuild: true,
+            use_curves: None,
+            damping: None,
+            stiffness: None,
+            gravity_scale: None,
+            world_damping_location: None,
+            world_damping_rotation: None,
+            teleport_distance_threshold: None,
+            teleport_rotation_threshold: None,
+            enable_warm_up: None,
+            warm_up_frames: None,
+            clear_curve_data: false,
+            clear_external_forces: false,
+            disable_wind: false,
+            use_world_space_gravity: None,
+            use_project_gravity: None,
+        }
+    }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+impl KawaiiPhysicsAdvancedOptions {
+    pub fn edit_options_json(&self) -> Option<String> {
+        let value = serde_json::to_value(self).ok()?;
+        value
+            .as_object()
+            .filter(|object| !object.is_empty())
+            .and_then(|_| serde_json::to_string(&value).ok())
+    }
+}
+
+fn tri_state_label(value: Option<bool>) -> &'static str {
+    match value {
+        None => "Keep original",
+        Some(true) => "Enabled",
+        Some(false) => "Disabled",
+    }
+}
+
+fn optional_f32(ui: &mut egui::Ui, label: &str, value: &mut Option<f32>, initial: f32) {
+    let mut enabled = value.is_some();
+    if ui.checkbox(&mut enabled, label).changed() {
+        *value = enabled.then_some(initial);
+    }
+    if let Some(value) = value.as_mut() {
+        ui.add(egui::DragValue::new(value).speed(0.01));
+    } else {
+        ui.weak("Keep original");
+    }
+    ui.end_row();
+}
+
+fn optional_i32(ui: &mut egui::Ui, label: &str, value: &mut Option<i32>, initial: i32) {
+    let mut enabled = value.is_some();
+    if ui.checkbox(&mut enabled, label).changed() {
+        *value = enabled.then_some(initial);
+    }
+    if let Some(value) = value.as_mut() {
+        ui.add(egui::DragValue::new(value).range(0..=10_000));
+    } else {
+        ui.weak("Keep original");
+    }
+    ui.end_row();
+}
+
+fn tri_state(ui: &mut egui::Ui, id: &str, label: &str, value: &mut Option<bool>) {
+    ui.label(label);
+    ComboBox::from_id_salt(ui.make_persistent_id(id))
+        .width(130.0)
+        .selected_text(tri_state_label(*value))
+        .show_ui(ui, |ui| {
+            ui.selectable_value(value, None, "Keep original");
+            ui.selectable_value(value, Some(true), "Enabled");
+            ui.selectable_value(value, Some(false), "Disabled");
+        });
+    ui.end_row();
+}
+
+pub(crate) fn render_kawaii_advanced_options(
+    ui: &mut egui::Ui,
+    options: &mut KawaiiPhysicsAdvancedOptions,
+) {
+    ui.small("Overrides apply to every converted chain.");
+    ui.checkbox(
+        &mut options.force_chain_rebuild,
+        "Rebuild existing chains (recommended)",
+    )
+    .on_hover_text("Rewrites Chains[0] so overrides and fixes apply. Turn off to keep existing chain data untouched.");
+    if !options.force_chain_rebuild {
+        ui.colored_label(
+            egui::Color32::YELLOW,
+            "Nodes that already have chain data will be skipped and left as-is.",
+        );
+    }
+
+    ui.add_space(4.0);
+    egui::Grid::new("kawaii_advanced_values")
+        .num_columns(2)
+        .spacing([12.0, 6.0])
+        .show(ui, |ui| {
+            tri_state(
+                ui,
+                "kawaii_use_curves",
+                "Use curves",
+                &mut options.use_curves,
+            );
+            optional_f32(ui, "Damping", &mut options.damping, 0.1);
+            optional_f32(ui, "Stiffness", &mut options.stiffness, 0.05);
+            optional_f32(ui, "Gravity scale", &mut options.gravity_scale, 1.0);
+            optional_f32(
+                ui,
+                "World damping — location",
+                &mut options.world_damping_location,
+                0.8,
+            );
+            optional_f32(
+                ui,
+                "World damping — rotation",
+                &mut options.world_damping_rotation,
+                0.8,
+            );
+            optional_f32(
+                ui,
+                "Teleport distance",
+                &mut options.teleport_distance_threshold,
+                300.0,
+            );
+            optional_f32(
+                ui,
+                "Teleport rotation",
+                &mut options.teleport_rotation_threshold,
+                10.0,
+            );
+            tri_state(ui, "kawaii_warm_up", "Warm up", &mut options.enable_warm_up);
+            optional_i32(ui, "Warm-up frames", &mut options.warm_up_frames, 0);
+            tri_state(
+                ui,
+                "kawaii_world_gravity",
+                "World-space gravity",
+                &mut options.use_world_space_gravity,
+            );
+            tri_state(
+                ui,
+                "kawaii_project_gravity",
+                "Project gravity",
+                &mut options.use_project_gravity,
+            );
+        });
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.checkbox(&mut options.clear_curve_data, "Clear curve data");
+        ui.checkbox(&mut options.clear_external_forces, "Clear external forces");
+        ui.checkbox(&mut options.disable_wind, "Disable wind");
+    });
+
+    if ui.button("Reset KawaiiPhysics options").clicked() {
+        *options = KawaiiPhysicsAdvancedOptions::default();
+    }
+}
+
+fn install_mod_row_height(mod_entry: &InstallableMod) -> f32 {
+    if !mod_entry.options_expanded {
+        28.0
+    } else if (mod_entry.is_dir || mod_entry.repak)
+        && mod_entry.kawaii_porter
+        && mod_entry.kawaii_advanced_expanded
+    {
+        940.0
+    } else {
+        340.0
+    }
+}
+
+fn render_install_mod_options(ui: &mut egui::Ui, mod_entry: &mut InstallableMod) {
+    let options_label = if mod_entry.options_expanded {
+        "▼ Options"
+    } else {
+        "▶ Options"
+    };
+    if ui
+        .add(egui::Button::new(options_label).frame(false))
+        .clicked()
+    {
+        mod_entry.options_expanded = !mod_entry.options_expanded;
+        return;
+    }
+    if !mod_entry.options_expanded {
+        return;
+    }
+
+    ui.indent("install_mod_options", |ui| {
+        ui.spacing_mut().item_spacing.y = 6.0;
+        let repack_controls_enabled = !mod_entry.is_dir;
+        let porter_enabled = mod_entry.is_dir || mod_entry.repak;
+
+        ui.add_enabled(
+            repack_controls_enabled && !mod_entry.is_dir,
+            Checkbox::new(&mut mod_entry.repak, "To repak"),
+        );
+        ui.add_enabled(
+            porter_enabled,
+            Checkbox::new(&mut mod_entry.kawaii_porter, "Convert KawaiiPhysics"),
+        );
+
+        if porter_enabled && mod_entry.kawaii_porter {
+            let advanced_label = if mod_entry.kawaii_advanced_expanded {
+                "▼ Advanced KawaiiPhysics"
+            } else {
+                "▶ Advanced KawaiiPhysics"
+            };
+            let advanced_changed = ui
+                .add(egui::Button::new(advanced_label).frame(false))
+                .clicked();
+            if advanced_changed {
+                mod_entry.kawaii_advanced_expanded = !mod_entry.kawaii_advanced_expanded;
+            } else if mod_entry.kawaii_advanced_expanded {
+                ui.indent("kawaii_advanced_options", |ui| {
+                    render_kawaii_advanced_options(ui, &mut mod_entry.kawaii_options);
+                });
+            }
+        }
+
+        ui.add_enabled(
+            porter_enabled,
+            Checkbox::new(
+                &mut mod_entry.default_hidden_material_patch,
+                "Patch hidden mats",
+            ),
+        );
+        ui.add_enabled(
+            porter_enabled,
+            Checkbox::new(&mut mod_entry.obfuscated, "Obfuscate"),
+        );
+
+        let encryption_enabled = mod_entry.is_dir || mod_entry.iostore || mod_entry.repak;
+        let encrypt_response = ui.add_enabled(
+            encryption_enabled,
+            Checkbox::new(&mut mod_entry.encrypted, "Encrypt"),
+        );
+        if encrypt_response.changed() && mod_entry.encrypted && mod_entry.iostore {
+            mod_entry.repak = true;
+        }
+
+        let strip_enabled = mod_entry.mod_type == "Audio"
+            && !mod_entry.iostore
+            && (mod_entry.is_dir || mod_entry.repak)
+            && mod_entry.strip_blockers.is_empty();
+        ui.add_enabled(
+            strip_enabled,
+            Checkbox::new(&mut mod_entry.strip_audio, "Strip audio mod"),
+        )
+        .on_hover_text(
+            "Write the .pak without a file list and without compression. The game still \
+             loads it, but other tools can no longer list its contents.",
+        );
+        if !mod_entry.strip_blockers.is_empty() {
+            ui.colored_label(
+                egui::Color32::YELLOW,
+                format!(
+                    "Can't strip: the mod has files other than audio banks ({}).",
+                    install_mod_logic::pak_files::summarize_strip_blockers(&mod_entry.strip_blockers)
+                ),
+            );
+        }
+        let unnamed = mod_entry
+            .reader
+            .as_ref()
+            .map_or(0, |reader| reader.unresolved_path_hashes().len());
+        if unnamed > 0 {
+            ui.colored_label(
+                egui::Color32::YELLOW,
+                format!(
+                    "{unnamed} stripped entries could not be named from the game files; \
+                     this pak will be installed as-is."
+                ),
+            );
+        }
+
+        ui.add_enabled(
+            porter_enabled,
+            TextEdit::singleline(&mut mod_entry.mount_point)
+                .hint_text("Enter mount point...")
+                .desired_width(300.0),
+        );
+        ui.add_enabled(
+            porter_enabled,
+            TextEdit::singleline(&mut mod_entry.path_hash_seed)
+                .hint_text("Enter path hash seed...")
+                .desired_width(300.0),
+        );
+        ui.add_enabled_ui(porter_enabled, |ui| {
+            ComboBox::new("comp_level", "Compression")
+                .width(180.0)
+                .selected_text(format!("{:?}", mod_entry.compression))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut mod_entry.compression, Compression::Zlib, "Zlib");
+                    ui.selectable_value(&mut mod_entry.compression, Compression::Gzip, "Gzip");
+                    ui.selectable_value(&mut mod_entry.compression, Compression::Oodle, "Oodle");
+                    ui.selectable_value(&mut mod_entry.compression, Compression::Zstd, "Zstd");
+                    ui.selectable_value(&mut mod_entry.compression, Compression::LZ4, "LZ4");
+                });
+        });
+    });
+}
+
 fn install_needs_to_legacy_console(mods: &[InstallableMod]) -> bool {
     mods.iter()
         .any(|mods| mods.enabled && mods.iostore && mods.repak)
@@ -35,6 +384,9 @@ pub struct InstallableMod {
     pub mod_type: String,
     pub repak: bool,
     pub kawaii_porter: bool,
+    pub kawaii_options: KawaiiPhysicsAdvancedOptions,
+    pub options_expanded: bool,
+    pub kawaii_advanced_expanded: bool,
     pub default_hidden_material_patch: bool,
     pub is_dir: bool,
     pub editing: bool,
@@ -72,6 +424,9 @@ impl Default for InstallableMod {
             mod_type: "".to_string(),
             repak: false,
             kawaii_porter: true,
+            kawaii_options: KawaiiPhysicsAdvancedOptions::default(),
+            options_expanded: false,
+            kawaii_advanced_expanded: false,
             default_hidden_material_patch: true,
             is_dir: false,
             editing: false,
@@ -242,9 +597,10 @@ impl ModInstallRequest {
         let viewport_options = egui::ViewportBuilder::default()
             .with_title("Install mods")
             .with_icon(ICON.clone())
-            .with_inner_size([1000.0, 800.0])
+            .with_inner_size([1280.0, 800.0])
+            .with_min_inner_size([1000.0, 500.0])
             .with_always_on_top();
-        
+
         Context::show_viewport_immediate(
             ctx,
             egui::ViewportId::from_hash_of("immediate_viewport"),
@@ -256,22 +612,10 @@ impl ModInstallRequest {
                 );
 
                 setup_custom_style(ctx,pink_theme);
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    ui.label("Mods to install");
-                    ui.set_min_width(ui.available_width());
-                    ui.set_min_height(ui.available_height());
-                    // ScrollArea::vertical()
-                    //     .auto_shrink([false, false])
-                    //     .show(ui, |ui| {
-                    self.table_ui(ui);
-                    // });
-                });
-                egui::TopBottomPanel::bottom("bottom_panel")
+                egui::TopBottomPanel::bottom("install_mod_bottom_panel")
                     .min_height(50.)
                     .show(ctx, |ui| {
-                        // ui.heading("WTF");
                         ui.set_min_width(ui.available_width());
-                        ui.set_min_height(ui.available_height());
                         Flex::horizontal()
                             .align_items(FlexAlign::Center)
                             .w_auto()
@@ -374,6 +718,11 @@ impl ModInstallRequest {
                             *show_callback = false;
                         }
                     });
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.label("Mods to install");
+                    ui.separator();
+                    self.table_ui(ui);
+                });
                 if ctx.input(|i| i.viewport().close_requested()) {
                     warn!("Install dialog viewport was closed");
                     // Tell parent viewport that we should not show next frame:
@@ -385,18 +734,18 @@ impl ModInstallRequest {
 
     fn table_ui(&mut self, ui: &mut egui::Ui) {
         let available_height = ui.available_height();
-        ui.separator();
 
         let table = TableBuilder::new(ui)
             .striped(true)
-            // .resizable(true)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::LEFT))
-            .column(Column::auto())
-            .column(Column::auto())
-            .column(Column::remainder().at_least(400.)) // mod name
-            .column(Column::auto()) // Character
-            .column(Column::auto()) // type
-            .column(Column::remainder()) // options
+            .resizable(true)
+            .auto_shrink([false, false])
+            .cell_layout(egui::Layout::top_down(egui::Align::LEFT))
+            .column(Column::exact(70.0))
+            .column(Column::exact(44.0))
+            .column(Column::remainder().at_least(220.0).clip(true)) // mod name
+            .column(Column::initial(110.0).at_least(90.0)) // Character
+            .column(Column::initial(90.0).at_least(75.0)) // type
+            .column(Column::initial(460.0).at_least(420.0)) // options
             .min_scrolled_height(0.0)
             .max_scroll_height(available_height);
 
@@ -427,7 +776,8 @@ impl ModInstallRequest {
             })
             .body(|mut body| {
                 for (rowidx, mods) in self.mods.iter_mut().enumerate() {
-                    body.row(20., |mut row| {
+                    let row_height = install_mod_row_height(mods);
+                    body.row(row_height, |mut row| {
                         row.col(|ui| {
                             ui.add(Checkbox::new(&mut mods.enabled, ""));
                         });
@@ -480,119 +830,9 @@ impl ModInstallRequest {
                             ui.label(label);
                         });
                         row.col(|ui| {
-                            ui.collapsing("Options", |ui| {
-                                let repack_controls_enabled = !mods.is_dir;
-                                let porter_enabled = mods.is_dir || mods.repak;
-
-                                ui.add_enabled(
-                                    repack_controls_enabled && !mods.is_dir,
-                                    Checkbox::new(&mut mods.repak, "To repak"),
-                                );
-                                ui.add_enabled(
-                                    porter_enabled,
-                                    Checkbox::new(&mut mods.kawaii_porter, "Kawaii porter"),
-                                );
-                                ui.add_enabled(
-                                    porter_enabled,
-                                    Checkbox::new(
-                                        &mut mods.default_hidden_material_patch,
-                                        "Patch hidden mats",
-                                    ),
-                                );
-
-                                ui.add_enabled(
-                                    porter_enabled,
-                                    Checkbox::new(&mut mods.obfuscated, "Obfuscate"),
-                                );
-                                let encryption_enabled = mods.is_dir || mods.iostore || mods.repak;
-                                let encrypt_response = ui.add_enabled(
-                                    encryption_enabled,
-                                    Checkbox::new(&mut mods.encrypted, "Encrypt"),
-                                );
-                                if encrypt_response.changed() && mods.encrypted && mods.iostore {
-                                    mods.repak = true;
-                                }
-
-                                let strip_enabled = mods.mod_type == "Audio"
-                                    && !mods.iostore
-                                    && (mods.is_dir || mods.repak)
-                                    && mods.strip_blockers.is_empty();
-                                ui.add_enabled(
-                                    strip_enabled,
-                                    Checkbox::new(&mut mods.strip_audio, "Strip audio mod"),
-                                )
-                                .on_hover_text(
-                                    "Write the .pak without a file list and without compression. \
-                                     The game still loads it, but other tools can no longer list \
-                                     its contents.",
-                                );
-                                if !mods.strip_blockers.is_empty() {
-                                    ui.colored_label(
-                                        egui::Color32::YELLOW,
-                                        format!(
-                                            "Can't strip: the mod has files other than audio banks ({}).",
-                                            install_mod_logic::pak_files::summarize_strip_blockers(&mods.strip_blockers)
-                                        ),
-                                    );
-                                }
-                                let unnamed = mods
-                                    .reader
-                                    .as_ref()
-                                    .map_or(0, |reader| reader.unresolved_path_hashes().len());
-                                if unnamed > 0 {
-                                    ui.colored_label(
-                                        egui::Color32::YELLOW,
-                                        format!(
-                                            "{unnamed} stripped entries could not be named from \
-                                             the game files; this pak will be installed as-is."
-                                        ),
-                                    );
-                                }
-
-                                let text_edit = TextEdit::singleline(&mut mods.mount_point);
-                                ui.add_enabled(
-                                    porter_enabled,
-                                    text_edit.hint_text("Enter mount point..."),
-                                );
-
-                                // Text edit for path_hash_seed with hint
-                                let text_edit = TextEdit::singleline(&mut mods.path_hash_seed);
-                                ui.add_enabled(
-                                    porter_enabled,
-                                    text_edit.hint_text("Enter path hash seed..."),
-                                );
-
-                                ui.add_enabled_ui(porter_enabled, |ui| {
-                                    ComboBox::new("comp_level", "Compression Algorithm")
-                                        .selected_text(format!("{:?}", mods.compression))
-                                        .show_ui(ui, |ui| {
-                                            ui.selectable_value(
-                                                &mut mods.compression,
-                                                Compression::Zlib,
-                                                "Zlib",
-                                            );
-                                            ui.selectable_value(
-                                                &mut mods.compression,
-                                                Compression::Gzip,
-                                                "Gzip",
-                                            );
-                                            ui.selectable_value(
-                                                &mut mods.compression,
-                                                Compression::Oodle,
-                                                "Oodle",
-                                            );
-                                            ui.selectable_value(
-                                                &mut mods.compression,
-                                                Compression::Zstd,
-                                                "Zstd",
-                                            );
-                                            ui.selectable_value(
-                                                &mut mods.compression,
-                                                Compression::LZ4,
-                                                "LZ4",
-                                            );
-                                        });
-                                });
+                            let options_id = mods.mod_path.clone();
+                            ui.push_id(options_id, |ui| {
+                                render_install_mod_options(ui, mods);
                             });
                         });
                     })
@@ -872,7 +1112,45 @@ pub fn map_dropped_file_to_mods(dropped_files: &[egui::DroppedFile]) -> Vec<Inst
 
 #[cfg(test)]
 mod tests {
-    use super::is_unsupported_companion_entry;
+    use super::{
+        install_mod_row_height, is_unsupported_companion_entry, InstallableMod,
+        KawaiiPhysicsAdvancedOptions,
+    };
+
+    #[test]
+    fn expanded_install_options_reserve_their_table_height() {
+        let mut mod_entry = InstallableMod::default();
+        let collapsed = install_mod_row_height(&mod_entry);
+        mod_entry.options_expanded = true;
+        mod_entry.is_dir = true;
+        let options = install_mod_row_height(&mod_entry);
+        mod_entry.kawaii_advanced_expanded = true;
+        let advanced = install_mod_row_height(&mod_entry);
+
+        assert!(options > collapsed);
+        assert!(advanced > options);
+    }
+
+    #[test]
+    fn kawaii_advanced_options_rebuild_by_default_and_use_bridge_names() {
+        let defaults = KawaiiPhysicsAdvancedOptions::default();
+        assert!(defaults.force_chain_rebuild);
+        assert_eq!(defaults.edit_options_json(), None);
+
+        let options = KawaiiPhysicsAdvancedOptions {
+            force_chain_rebuild: true,
+            damping: Some(0.25),
+            clear_curve_data: true,
+            use_world_space_gravity: Some(false),
+            ..Default::default()
+        };
+        let json: serde_json::Value =
+            serde_json::from_str(&options.edit_options_json().unwrap()).unwrap();
+        assert_eq!(json["damping"], 0.25);
+        assert_eq!(json["clearCurveData"], true);
+        assert_eq!(json["useWorldSpaceGravity"], false);
+        assert!(json.get("forceChainRebuild").is_none());
+    }
 
     #[test]
     fn detects_unsupported_entries_at_the_mounted_path() {
