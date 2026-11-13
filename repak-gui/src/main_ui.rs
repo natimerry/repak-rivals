@@ -186,6 +186,9 @@ pub struct RepakModManager {
     make_backups: bool,
 
     #[serde(default = "default_true")]
+    check_updates_on_launch: bool,
+
+    #[serde(default = "default_true")]
     strip_audio_mods: bool,
 }
 
@@ -394,6 +397,7 @@ impl RepakModManager {
         let mut x = Self {
             game_path,
             default_font_size: 18.0,
+            check_updates_on_launch: true,
             strip_audio_mods: true,
             pak_files: vec![],
             current_pak_file_idx: None,
@@ -3084,6 +3088,18 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
                 });
 
                 ui.horizontal(|ui| {
+                    ui.label("Check for updates on launch");
+                    if ui
+                        .add(ios_widget::toggle(&mut self.check_updates_on_launch))
+                        .changed()
+                    {
+                        if let Err(e) = self.save_state() {
+                            warn!(error = %e, "Failed to save update-check preference");
+                        }
+                    }
+                });
+
+                ui.horizontal(|ui| {
                     ui.label("Strip audio mods");
                     if ui
                         .add(ios_widget::toggle(&mut self.strip_audio_mods))
@@ -3280,7 +3296,11 @@ impl eframe::App for RepakModManager {
     #[instrument(skip(self, ctx, _frame))]
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if !self.update_check_started {
-            self.start_update_check(false);
+            if self.check_updates_on_launch {
+                self.start_update_check(false);
+            } else {
+                self.update_check_started = true;
+            }
         }
         self.process_update_messages(ctx);
         self.show_update_window(ctx);
