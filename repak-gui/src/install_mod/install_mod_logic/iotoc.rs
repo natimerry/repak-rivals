@@ -211,6 +211,13 @@ pub fn repack_iostore_direct(
         Err(e) => return Err(repak::Error::Io(std::io::Error::other(format!("Direct IoStore repack failed: {e:#}")))),
     };
     let companion = output_dir.join(format!("{name}.pak"));
+    if !companion.is_file() {
+        // The direct repack only writes .utoc/.ucas; carry the original companion pak over.
+        let source_pak = pak.mod_path.with_extension("pak");
+        if source_pak.is_file() {
+            std::fs::copy(&source_pak, &companion)?;
+        }
+    }
     if companion.is_file() {
         super::pak_files::rewrite_unsupported_companion_pak(&companion)?;
     }

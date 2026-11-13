@@ -1,5 +1,5 @@
 # Changelog
-## Version 3.11.0
+## Version 3.11.1
 - **Season 11:** the game's anti-cheat now checks every mod and reports encrypted/obfuscated and stripped mods. No bans yet, but don't keep them installed.
 - Add a prompt to repair encrypted mods. They are extracted and repacked without encryption, and the originals are backed up when `Make backups` is on. Also in `File -> Decryption Check` and the right-click menu (`Decrypt mod`).
 - Add a separate prompt to repair stripped mods. The file list is rebuilt from the game files and the pak is rewritten normally. Also in `File -> Stripped Mod Check` and the right-click menu (`Restore file list`).
