@@ -297,41 +297,22 @@ fn render_install_mod_options(ui: &mut egui::Ui, mod_entry: &mut InstallableMod)
                 "Patch hidden mats",
             ),
         );
+        // The game no longer loads obfuscated/encrypted/stripped mods, so these
+        // options are permanently disabled and forced off.
+        mod_entry.obfuscated = false;
+        mod_entry.encrypted = false;
+        mod_entry.strip_audio = false;
+        const DISABLED_HINT: &str =
+            "Disabled: the game no longer loads encrypted, obfuscated or stripped mods.";
+        ui.add_enabled(false, Checkbox::new(&mut mod_entry.obfuscated, "Obfuscate"))
+            .on_disabled_hover_text(DISABLED_HINT);
+        ui.add_enabled(false, Checkbox::new(&mut mod_entry.encrypted, "Encrypt"))
+            .on_disabled_hover_text(DISABLED_HINT);
         ui.add_enabled(
-            porter_enabled,
-            Checkbox::new(&mut mod_entry.obfuscated, "Obfuscate"),
-        );
-
-        let encryption_enabled = mod_entry.is_dir || mod_entry.iostore || mod_entry.repak;
-        let encrypt_response = ui.add_enabled(
-            encryption_enabled,
-            Checkbox::new(&mut mod_entry.encrypted, "Encrypt"),
-        );
-        if encrypt_response.changed() && mod_entry.encrypted && mod_entry.iostore {
-            mod_entry.repak = true;
-        }
-
-        let strip_enabled = mod_entry.mod_type == "Audio"
-            && !mod_entry.iostore
-            && (mod_entry.is_dir || mod_entry.repak)
-            && mod_entry.strip_blockers.is_empty();
-        ui.add_enabled(
-            strip_enabled,
+            false,
             Checkbox::new(&mut mod_entry.strip_audio, "Strip audio mod"),
         )
-        .on_hover_text(
-            "Write the .pak without a file list and without compression. The game still \
-             loads it, but other tools can no longer list its contents.",
-        );
-        if !mod_entry.strip_blockers.is_empty() {
-            ui.colored_label(
-                egui::Color32::YELLOW,
-                format!(
-                    "Can't strip: the mod has files other than audio banks ({}).",
-                    install_mod_logic::pak_files::summarize_strip_blockers(&mod_entry.strip_blockers)
-                ),
-            );
-        }
+        .on_disabled_hover_text(DISABLED_HINT);
         let unnamed = mod_entry
             .reader
             .as_ref()
@@ -534,9 +515,9 @@ impl ModInstallRequest {
     pub fn with_strip_audio_default(mut self, enabled: bool) -> Self {
         for installable_mod in &mut self.mods {
             installable_mod.strip_blockers = Self::find_strip_blockers(installable_mod);
-            installable_mod.strip_audio = enabled
-                && installable_mod.mod_type == "Audio"
-                && installable_mod.strip_blockers.is_empty();
+            // Stripping is disabled: the game no longer loads stripped paks.
+            let _ = enabled;
+            installable_mod.strip_audio = false;
         }
         self
     }

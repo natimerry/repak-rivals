@@ -2,7 +2,6 @@ extern crate core;
 
 use crate::file_table::FileTable;
 use crate::install_mod::install_mod_logic::iotoc::{to_legacy_uasset, to_legacy_uasset_fast};
-use crate::install_mod::install_mod_logic::pak_files::strip_installed_pak;
 use crate::install_mod::{
     self, map_dropped_file_to_mods, map_paths_to_mods, render_kawaii_advanced_options,
     InstallableMod, KawaiiPhysicsAdvancedOptions, ModInstallRequest,
@@ -50,10 +49,13 @@ const DEFAULT_HIDDEN_MATERIAL_BITMAPS: [u64; 3] = [0x0FFF0000, 0x0FFF0000, 0x0EF
 
 const DEFAULT_HIDDEN_MATERIAL_CREATOR_SLOTS: usize = 32;
 const MAX_DEFAULT_HIDDEN_MATERIAL_SLOTS: usize = 64;
-const ENCRYPTION_REQUIRED_MESSAGE: &str = "these mods touch files outside of the /Game/Marvel/Characters prefix so they wont load without encryption";
+const ENCRYPTION_REQUIRED_MESSAGE: &str = "Since Season 11, the game's anti-cheat checks every mod in your mods folder. Encrypted (obfuscated) mods fail this check and get reported. No action is being taken against them yet, but to avoid any risk of bans you should not keep encrypted mods installed.
+
+Repairing extracts each mod and repacks it without encryption, so it passes the check and loads normally. Your originals are backed up when \"Make backups\" is on.
+
+Modders: please re-upload your encrypted mods without encryption.";
+const DECRYPTION_REQUIRED_ROW_MESSAGE: &str = "This mod is encrypted. It fails the game's Season 11 anti-cheat check and gets reported. Right-click it and choose \"Decrypt mod\" to repair it.";
 const LEGACY_PAK_MESSAGE: &str = "Wait for bypass xo";
-const UNSTRIPPED_AUDIO_MESSAGE: &str =
-    "This audio mod won't load yet. Right-click it and choose \"Strip audio mod\" to fix it.";
 // use eframe::egui::WidgetText::RichText;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1039,15 +1041,10 @@ impl RepakModManager {
                         let is_iostore = self.pak_files[i].is_iostore;
                         // Stripped audio paks are plain paks on purpose and load fine.
                         let is_audio = self.pak_files[i].category == "Audio";
-                        let stripped = self.pak_files[i].stripped;
-                        let failure_message = if !is_iostore && is_audio && !stripped {
-                            Some(UNSTRIPPED_AUDIO_MESSAGE)
+                        let failure_message = if is_iostore && self.pak_files[i].encrypted {
+                            Some(DECRYPTION_REQUIRED_ROW_MESSAGE)
                         } else if !is_iostore && !is_audio {
                             Some(LEGACY_PAK_MESSAGE)
-                        } else if self.pak_files[i].outside_characters
-                            && !self.pak_files[i].encrypted
-                        {
-                            Some(ENCRYPTION_REQUIRED_MESSAGE)
                         } else {
                             None
                         };
@@ -1236,23 +1233,20 @@ let row_stroke = Stroke::new(
                 .encryption_worker
                 .as_ref()
                 .is_some_and(|worker| !worker.is_finished());
-            let already_encrypted = self
+            let encrypted = self
                 .pak_files
                 .get(i)
                 .map(|entry| entry.encrypted)
                 .unwrap_or(false);
-            let label = if already_encrypted {
-                "Re-encrypt mod"
-            } else {
-                "Encrypt mod"
-            };
             let response = ui.add_enabled(
-                self.game_chunk_path.is_some() && !encryption_running,
-                Button::new(label),
+                encrypted && self.game_chunk_path.is_some() && !encryption_running,
+                Button::new("Decrypt mod"),
             );
-            if self.game_chunk_path.is_none() {
-                response.clone().on_hover_text(
-                    "The Marvel Rivals game Paks directory is required to encrypt this mod.",
+            if !encrypted {
+                response.clone().on_disabled_hover_text("This mod is not encrypted.");
+            } else if self.game_chunk_path.is_none() {
+                response.clone().on_disabled_hover_text(
+                    "The Marvel Rivals game Paks directory is required to decrypt this mod.",
                 );
             }
             if response.clicked() {
@@ -1261,36 +1255,9 @@ let row_stroke = Stroke::new(
             }
             ui.separator();
         }
-        let unstripped_audio = self.pak_files.get(i).is_some_and(|entry| {
-            !entry.is_iostore
-                && !entry.metadata_pending
-                && !entry.stripped
-                && entry.category == "Audio"
-        });
-        if unstripped_audio {
-            let response = ui
-                .button("Strip audio mod")
-                .on_hover_text("Rewrite this pak without a file list and uncompressed so it loads.");
-            if response.clicked() {
-                ui.close_menu();
-                match strip_installed_pak(pak_path, self.make_backups) {
-                    Ok(()) => {
-                        info!(path = %pak_path.display(), "Stripped installed audio mod");
-                        self.collect_pak_files();
-                    }
-                    Err(e) => {
-                        error!(path = %pak_path.display(), error = %e, "Failed to strip audio mod");
-                        rfd::MessageDialog::new()
-                            .set_buttons(MessageButtons::Ok)
-                            .set_level(rfd::MessageLevel::Error)
-                            .set_title("Couldn't strip audio mod")
-                            .set_description(format!("{e}"))
-                            .show();
-                    }
-                }
-            }
-            ui.separator();
-        }
+        ui.add_enabled(false, Button::new("Strip audio mod"))
+            .on_disabled_hover_text("Disabled: the game no longer accepts stripped paks.");
+        ui.separator();
         if ui.button("Extract pak to directory").clicked() {
             info!(
                 mod_name = %pak_path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("<unknown>"),
@@ -2181,7 +2148,7 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
                 .path
                 .file_stem()
                 .and_then(|stem| stem.to_str())
-                .unwrap_or("encrypted_mod")
+                .unwrap_or("decrypted_mod")
                 .to_string(),
             mod_type: entry.characteristic.clone(),
             repak: false,
@@ -2201,8 +2168,9 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
             iostore: true,
             is_archived: false,
             enabled: entry.enabled,
-            obfuscated: entry.obfuscated.eq_ignore_ascii_case("true"),
-            encrypted: true,
+            // Repack without encryption/obfuscation: the game no longer loads them.
+            obfuscated: false,
+            encrypted: false,
             strip_audio: false,
             strip_blockers: Vec::new(),
             extracted_archive_dir: None,
@@ -2248,7 +2216,7 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
         }
         info!(
             mod_count = mods.len(),
-            "Starting encryption repack with terminal progress"
+            "Starting decryption repack with terminal progress"
         );
 
         let backup = self.make_backups;
@@ -2261,7 +2229,7 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
                     &Some(game_chunk_path.clone()),
                     backup,
                 )
-                .map_err(|error| format!("Failed to encrypt {}: {error}", installable.mod_name))?;
+                .map_err(|error| format!("Failed to decrypt {}: {error}", installable.mod_name))?;
             }
             progress.store(-255, Ordering::SeqCst);
             Ok(())
@@ -2293,12 +2261,12 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
             Ok(Ok(())) => {
                 info!(
                     mod_count = attempted.len(),
-                    "Finished encrypting installed IoStore mods"
+                    "Finished decrypting installed IoStore mods"
                 );
                 self.encryption_state = EncryptionUiState::Hidden;
             }
             Ok(Err(error)) => {
-                error!(error = %error, "Failed to encrypt installed IoStore mods");
+                error!(error = %error, "Failed to decrypt installed IoStore mods");
                 self.encryption_state = EncryptionUiState::Failed {
                     mods: attempted,
                     error,
@@ -2307,7 +2275,7 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
             Err(_) => {
                 self.encryption_state = EncryptionUiState::Failed {
                     mods: attempted,
-                    error: "The encryption worker panicked.".to_string(),
+                    error: "The decryption worker panicked.".to_string(),
                 };
             }
         }
@@ -2327,10 +2295,7 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
             .pak_files
             .iter()
             .filter(|entry| {
-                entry.is_iostore
-                    && !entry.metadata_pending
-                    && entry.outside_characters
-                    && !entry.encrypted
+                entry.is_iostore && entry.encrypted
             })
             .map(|entry| entry.path.clone())
             .collect::<Vec<_>>();
@@ -2355,7 +2320,7 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
             EncryptionUiState::Hidden => return,
             EncryptionUiState::Available(mods) => {
                 let window_size = update_window_size(ctx);
-                egui::Window::new("Mods need encryption")
+                egui::Window::new("Encrypted mods found")
                     .collapsible(false)
                     .resizable(false)
                     .fixed_size(window_size)
@@ -2366,7 +2331,7 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
                                 ui.set_width(left_width);
-                                ui.heading("Encryption required");
+                                ui.heading("Encrypted mods detected");
                                 ui.add_space(8.0);
                                 ui.add(Label::new(ENCRYPTION_REQUIRED_MESSAGE).wrap());
                                 ui.add_space(12.0);
@@ -2374,7 +2339,7 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
                                     .add_sized(
                                         [left_width, 30.0],
                                         Button::new(
-                                            RichText::new("Encrypt all").color(Color32::WHITE),
+                                            RichText::new("Repair all (remove encryption)").color(Color32::WHITE),
                                         )
                                         .fill(self.theme_accent()),
                                     )
@@ -2412,7 +2377,7 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
                                                 ui.with_layout(
                                                     egui::Layout::right_to_left(Align::Center),
                                                     |ui| {
-                                                        if ui.button("Encrypt").clicked() {
+                                                        if ui.button("Decrypt").clicked() {
                                                             action = Some(EncryptionAction::Start(
                                                                 vec![path.clone()],
                                                             ));
@@ -2429,7 +2394,7 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
             }
             EncryptionUiState::Encrypting(_) => {}
             EncryptionUiState::Failed { mods, error } => {
-                egui::Window::new("Encryption failed")
+                egui::Window::new("Decryption failed")
                     .collapsible(false)
                     .resizable(false)
                     .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
@@ -3047,14 +3012,14 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
                         }
                     }
                 }
-                if ui.button("Encryption Check").clicked() {
+                if ui.button("Decryption Check").clicked() {
                     self.encryption_prompt_evaluated = false;
                     self.maybe_show_encryption_prompt();
                     if !matches!(self.encryption_state, EncryptionUiState::Available(_)) {
                         rfd::MessageDialog::new()
                             .set_buttons(MessageButtons::Ok)
                             .set_title("Nothing to do")
-                            .set_description("No mods need encryption")
+                            .set_description("No encrypted mods found. You're good to go.")
                             .show();
                     }
                     self.show_encryption_window(ui.ctx());
@@ -3101,8 +3066,9 @@ let create_button = Button::new(RichText::new("Create").color(Color32::WHITE))
 
                 ui.horizontal(|ui| {
                     ui.label("Strip audio mods");
+                    self.strip_audio_mods = false;
                     if ui
-                        .add(ios_widget::toggle(&mut self.strip_audio_mods))
+                        .add_enabled(false, ios_widget::toggle(&mut self.strip_audio_mods))
                         .on_hover_text(
                             "Pre-select \"Strip audio mod\" for audio mods: written without a \
                              file list and uncompressed. You can still change it per mod.",
